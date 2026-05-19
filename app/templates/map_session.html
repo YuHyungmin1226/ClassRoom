@@ -686,19 +686,33 @@
         previewContent.innerHTML = '';
         previewContainer.style.display = 'none';
 
-        // 1. File preview takes precedence
+        let hasPreview = false;
+        let previewHtml = '';
+
+        // 0. Find existing flag data if editing
+        let flagToEdit = null;
+        const editId = document.getElementById(isInline ? 'inlineeditFlagId' : 'editFlagId').value;
+        if (editId) {
+            const flagIdInt = parseInt(editId);
+            if (classType === 'classmap') {
+                for (const key in flagGroups) {
+                    const found = flagGroups[key].find(f => f.id === flagIdInt);
+                    if (found) { flagToEdit = found; break; }
+                }
+            } else {
+                flagToEdit = allFlags.find(f => f.id === flagIdInt);
+            }
+        }
+
+        // 1. File preview
         if (fileInput.files && fileInput.files[0]) {
             const file = fileInput.files[0];
             const fileUrl = URL.createObjectURL(file);
             
             if (file.type.startsWith('image/')) {
-                previewContent.innerHTML = `<img src="${fileUrl}" style="max-width: 100%; max-height: 200px; border-radius: 4px;">`;
-                previewContainer.style.display = 'block';
-                return;
+                previewHtml += `<div style="margin-bottom: 10px;"><img src="${fileUrl}" style="max-width: 100%; max-height: 200px; border-radius: 4px;"></div>`;
             } else if (file.type.startsWith('video/')) {
-                previewContent.innerHTML = `<video controls src="${fileUrl}" style="max-width: 100%; max-height: 200px; border-radius: 4px; background: #000;"></video>`;
-                previewContainer.style.display = 'block';
-                return;
+                previewHtml += `<div style="margin-bottom: 10px;"><video controls src="${fileUrl}" style="max-width: 100%; max-height: 200px; border-radius: 4px; background: #000;"></video></div>`;
             } else {
                 const ext = file.name.split('.').pop().toLowerCase();
                 let icon = '📄';
@@ -707,36 +721,68 @@
                 else if (ext === 'html' || ext === 'htm') icon = '🌐';
                 else if (ext === 'txt') icon = '📝';
                 
-                previewContent.innerHTML = `
-                    <div style="padding: 15px; background: #f8fafc; border-radius: 6px; display: inline-flex; align-items: center; gap: 10px; margin-top: 5px;">
+                previewHtml += `
+                    <div style="padding: 15px; background: #f8fafc; border-radius: 6px; display: inline-flex; align-items: center; gap: 10px; margin-top: 5px; margin-bottom: 10px;">
                         <span style="font-size: 2rem;">${icon}</span>
                         <div style="text-align: left;">
                             <div style="font-weight: 600; font-size: 0.9rem; color: #1e293b; word-break: break-all;">${escapeHTML(file.name)}</div>
                             <div style="font-size: 0.75rem; color: #64748b;">${(file.size / 1024).toFixed(1)} KB</div>
                         </div>
                     </div>`;
-                previewContainer.style.display = 'block';
-                return;
             }
+            hasPreview = true;
+        } else if (flagToEdit && flagToEdit.file_path) {
+            // Preview existing file if editing and no new file selected
+            const previewPath = flagToEdit.file_path;
+            const ext = previewPath.split('.').pop().toLowerCase();
+            const imageExts = ['png', 'jpg', 'jpeg', 'gif'];
+            const videoExts = ['mp4', 'webm', 'mov'];
+            
+            previewHtml += `<div style="font-size: 0.8rem; color: #64748b; margin-bottom: 5px; text-align: left;">Current Attachment:</div>`;
+            if (imageExts.includes(ext)) {
+                previewHtml += `<div style="margin-bottom: 10px;"><img src="/${previewPath}" style="max-width: 100%; max-height: 200px; border-radius: 4px;"></div>`;
+            } else if (videoExts.includes(ext)) {
+                previewHtml += `<div style="margin-bottom: 10px;"><video controls src="/${previewPath}" style="max-width: 100%; max-height: 200px; border-radius: 4px; background: #000;"></video></div>`;
+            } else {
+                let icon = '📄';
+                if (ext === 'pdf') icon = '📕';
+                else if (ext === 'docx') icon = '📘';
+                else if (ext === 'html' || ext === 'htm') icon = '🌐';
+                else if (ext === 'txt') icon = '📝';
+                
+                const fileName = previewPath.split('/').pop().substring(33); // Remove uuid prefix
+                previewHtml += `
+                    <div style="padding: 15px; background: #f8fafc; border-radius: 6px; display: inline-flex; align-items: center; gap: 10px; margin-top: 5px; margin-bottom: 10px;">
+                        <span style="font-size: 2rem;">${icon}</span>
+                        <div style="text-align: left;">
+                            <div style="font-weight: 600; font-size: 0.9rem; color: #1e293b; word-break: break-all;">${escapeHTML(fileName || 'Attached Document')}</div>
+                        </div>
+                    </div>`;
+            }
+            hasPreview = true;
         }
 
-        // 2. YouTube preview
+        // 2. YouTube & Text preview
         if (textVal) {
-            // Check for Markdown content first
-            previewContent.innerHTML = `<div class="post-content" style="text-align: left;">${renderMarkdown(textVal)}</div>`;
-            previewContainer.style.display = 'block';
+            previewHtml += `<div class="post-content" style="text-align: left;">${renderMarkdown(textVal)}</div>`;
+            hasPreview = true;
 
             const words = textVal.split(/\s+/);
             for (let word of words) {
                 const ytId = getYouTubeId(word);
                 if (ytId) {
-                    previewContent.innerHTML += `
+                    previewHtml += `
                     <div style="position: relative; width: 100%; padding-bottom: 56.25%; height: 0; border-radius: 4px; overflow: hidden; margin-top: 10px;">
                         <iframe src="https://www.youtube.com/embed/${ytId}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;" allowfullscreen></iframe>
                     </div>`;
-                    return;
+                    break;
                 }
             }
+        }
+
+        if (hasPreview) {
+            previewContent.innerHTML = previewHtml;
+            previewContainer.style.display = 'block';
         }
     }
 
