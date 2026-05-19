@@ -521,10 +521,9 @@
                 placeholder="Share your thoughts or paste a YouTube link..."></textarea>
         </div>
         <div class="form-group">
-            <label style="font-size: 0.9rem; color: #64748b; display: block; margin-bottom: 5px;">Attach Image or
-                Video</label>
+            <label style="font-size: 0.9rem; color: #64748b; display: block; margin-bottom: 5px;">Attach File (Image, Video, Document, HTML)</label>
             <input type="file" id="inlinefileInput" class="form-control"
-                accept="image/*,video/mp4,video/webm,video/quicktime">
+                accept="image/*,video/*,.pdf,.txt,.docx,.html,.htm">
         </div>
 
         <!-- Live Preview Container -->
@@ -577,7 +576,7 @@
             <div class="form-group">
                 <label>Attach File (Optional, replaces existing if editing)</label>
                 <input type="file" id="fileInput" class="form-control"
-                    accept="image/*,video/mp4,video/webm,video/quicktime">
+                    accept="image/*,video/*,.pdf,.txt,.docx,.html,.htm">
             </div>
 
             <!-- Live Preview Container -->
@@ -698,6 +697,24 @@
                 return;
             } else if (file.type.startsWith('video/')) {
                 previewContent.innerHTML = `<video controls src="${fileUrl}" style="max-width: 100%; max-height: 200px; border-radius: 4px; background: #000;"></video>`;
+                previewContainer.style.display = 'block';
+                return;
+            } else {
+                const ext = file.name.split('.').pop().toLowerCase();
+                let icon = '📄';
+                if (ext === 'pdf') icon = '📕';
+                else if (ext === 'docx') icon = '📘';
+                else if (ext === 'html' || ext === 'htm') icon = '🌐';
+                else if (ext === 'txt') icon = '📝';
+                
+                previewContent.innerHTML = `
+                    <div style="padding: 15px; background: #f8fafc; border-radius: 6px; display: inline-flex; align-items: center; gap: 10px; margin-top: 5px;">
+                        <span style="font-size: 2rem;">${icon}</span>
+                        <div style="text-align: left;">
+                            <div style="font-weight: 600; font-size: 0.9rem; color: #1e293b; word-break: break-all;">${escapeHTML(file.name)}</div>
+                            <div style="font-size: 0.75rem; color: #64748b;">${(file.size / 1024).toFixed(1)} KB</div>
+                        </div>
+                    </div>`;
                 previewContainer.style.display = 'block';
                 return;
             }
@@ -1087,6 +1104,8 @@
                     html += `<a href="/${flagData.file_path}" target="_blank"><img src="/${flagData.file_path}"></a>`;
                 } else if (['mp4', 'webm', 'mov'].includes(ext)) {
                     html += `<video controls src="/${flagData.file_path}" style="background: #000; width: 100%;"></video>`;
+                } else if (['html', 'htm'].includes(ext)) {
+                    html += `<a href="/${flagData.file_path}" target="_blank" class="btn btn-primary btn-sm" style="display:inline-flex; align-items:center; gap:6px; text-decoration:none;">🌐 Open HTML Page</a>`;
                 } else {
                     html += `<a href="/${flagData.file_path}" target="_blank" class="btn btn-secondary btn-sm">📄 View Attachment</a>`;
                 }
@@ -1258,6 +1277,8 @@
                     html += `<a href="/${flagData.file_path}" target="_blank"><img src="/${flagData.file_path}" style="max-width: 100%; border-radius: 4px; margin-top: 10px;"></a>`;
                 } else if (videoExts.includes(ext)) {
                     html += `<video controls src="/${flagData.file_path}" style="max-width: 100%; max-height: 300px; border-radius: 4px; margin-top: 10px; width: 100%; background: #000;"></video>`;
+                } else if (['html', 'htm'].includes(ext)) {
+                    html += `<a href="/${flagData.file_path}" target="_blank" class="btn btn-primary btn-sm" style="display:inline-flex; align-items:center; gap:6px; margin-top:10px; text-decoration:none;">🌐 Open HTML Page</a>`;
                 } else {
                     html += `<a href="/${flagData.file_path}" target="_blank" class="btn btn-secondary btn-sm" style="display:inline-block; margin-top:10px; text-decoration:none;">📄 View Attached Document</a>`;
                 }

@@ -12,7 +12,7 @@ from .config import Config
 
 main = Blueprint('main', __name__)
 
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'webm', 'mov'}
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'webm', 'mov', 'html', 'htm'}
 
 @main.route('/uploads/<filename>')
 def uploaded_file(filename):
