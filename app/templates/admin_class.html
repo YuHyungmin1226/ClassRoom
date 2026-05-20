@@ -53,5 +53,25 @@
         <p class="empty-state">No active sessions.</p>
         {% endif %}
     </div>
+
+    <div class="card" style="grid-column: span 2; margin-top: 20px;">
+        <h3>Archived Sessions</h3>
+        {% if past_sessions %}
+        <ul class="session-list">
+            {% for s in past_sessions %}
+            <li class="session-item"
+                style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 10px;">
+                <span style="font-weight: 500; font-size: 1.1em; color: #64748b;">{{ s.name }} <span style="font-size: 0.8em; color: #ef4444;">(Closed)</span></span>
+                <div style="display: flex; gap: 10px; align-items: stretch;">
+                    <a href="{{ url_for('main.view_session', session_id=s.id) }}" class="btn btn-secondary btn-sm"
+                        style="display: flex; align-items: center; justify-content: center; margin: 0;">View Archive</a>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="empty-state">No archived sessions.</p>
+        {% endif %}
+    </div>
 </div>
 {% endblock %}

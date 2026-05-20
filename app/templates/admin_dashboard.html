@@ -45,5 +45,24 @@ function promptClassName() {
             <p class="empty-state">No active classes.</p>
         {% endif %}
     </div>
+    
+    <div class="card" style="grid-column: span 2; margin-top: 20px;">
+        <h3>Archived Classes</h3>
+        {% if past_classes %}
+            <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; margin-top: 15px;">
+            {% for c in past_classes %}
+                <div class="card session-card" style="box-shadow: 0 2px 4px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; background-color: #f8fafc;">
+                    <h4 style="margin-top: 0; margin-bottom: 10px; color: #64748b;">{{ c.name }} <span style="font-size: 0.8em; color: #ef4444;">(Closed)</span></h4>
+                    <p style="font-size: 0.85em; color: #94a3b8; margin-bottom: 15px;">Created: {{ c.created_at.strftime('%Y-%m-%d') }}</p>
+                    <div style="display: flex; gap: 10px; align-items: stretch;">
+                        <a href="{{ url_for('main.admin_class', class_id=c.id) }}" class="btn btn-secondary btn-sm" style="flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; margin: 0;">View Archive</a>
+                    </div>
+                </div>
+            {% endfor %}
+            </div>
+        {% else %}
+            <p class="empty-state">No archived classes.</p>
+        {% endif %}
+    </div>
 </div>
 {% endblock %}
