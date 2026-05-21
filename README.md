@@ -9,7 +9,7 @@ Classroom Portal is a real-time, interactive collaboration platform designed for
 - **Dual Activity Modes**: Choose between a Map view for spatial activities or a Board view for discussions and sharing.
 - **Media Uploads**: Attach images and videos to your contributions with inline preview and playback.
 - **YouTube Integration**: Paste a YouTube URL to automatically embed the video player in your note or post.
-- **Hierarchy Management**: Administrators can manage multiple Classes, each containing separate active Sessions.
+- **Hierarchy Management**: Administrators can manage multiple Classes and Sessions, including closing (archiving) them for review, or permanently deleting them along with their posts and uploaded media assets.
 - **Unified UI**: A sleek, modern interface with a consistent header system and responsive design across all views.
 - **Easy Network Access**: The server automatically detects local IPs, making it easy for students to join via their mobile devices on the same Wi-Fi.
 
