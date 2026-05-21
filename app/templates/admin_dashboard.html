@@ -55,7 +55,10 @@ function promptClassName() {
                     <h4 style="margin-top: 0; margin-bottom: 10px; color: #64748b;">{{ c.name }} <span style="font-size: 0.8em; color: #ef4444;">(Closed)</span></h4>
                     <p style="font-size: 0.85em; color: #94a3b8; margin-bottom: 15px;">Created: {{ c.created_at.strftime('%Y-%m-%d') }}</p>
                     <div style="display: flex; gap: 10px; align-items: stretch;">
-                        <a href="{{ url_for('main.admin_class', class_id=c.id) }}" class="btn btn-secondary btn-sm" style="flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; margin: 0;">View Archive</a>
+                        <a href="{{ url_for('main.admin_class', class_id=c.id) }}" class="btn btn-secondary btn-sm" style="flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; margin: 0;">View</a>
+                        <form method="POST" action="{{ url_for('main.delete_class', class_id=c.id) }}" style="margin: 0; display: flex;" onsubmit="return confirm('클래스와 포함된 모든 세션 및 작성된 노드가 영구 삭제됩니다. 정말 삭제하시겠습니까?');">
+                            <button type="submit" class="btn btn-danger btn-sm" style="height: 100%; display: flex; align-items: center; justify-content: center; margin: 0;">Delete</button>
+                        </form>
                     </div>
                 </div>
             {% endfor %}

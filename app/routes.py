@@ -21,6 +21,17 @@ def uploaded_file(filename):
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def delete_file_safe(file_path):
+    if not file_path:
+        return
+    filename = os.path.basename(file_path)
+    abs_path = os.path.join(Config.UPLOAD_FOLDER, filename)
+    try:
+        if os.path.exists(abs_path) and os.path.isfile(abs_path):
+            os.remove(abs_path)
+    except Exception as e:
+        print(f"Failed to delete orphaned file {abs_path}: {e}")
+
 # --- Admin Routes ---
 @main.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
@@ -76,6 +87,24 @@ def close_class(class_id):
     db.session.commit()
     return redirect(url_for('main.admin_dashboard', type=c.class_type))
 
+@main.route('/admin/delete_class/<class_id>', methods=['POST'])
+def delete_class(class_id):
+    if not session.get('admin_logged_in'):
+        return jsonify({'error': 'Unauthorized'}), 401
+    c = ClassGroup.query.get_or_404(class_id)
+    class_type = c.class_type
+    
+    # Safely clean up associated uploaded files from disk
+    for s in c.sessions:
+        for f in s.flags:
+            delete_file_safe(f.file_path)
+            delete_file_safe(f.thumbnail_path)
+            
+    db.session.delete(c)
+    db.session.commit()
+    flash(f"Class '{c.name}' has been successfully deleted.")
+    return redirect(url_for('main.admin_dashboard', type=class_type))
+
 @main.route('/admin/class/<class_id>')
 def admin_class(class_id):
     if not session.get('admin_logged_in'):
@@ -107,6 +136,23 @@ def close_session(session_id):
     s.is_active = False
     db.session.commit()
     return redirect(url_for('main.admin_class', class_id=s.class_id))
+
+@main.route('/admin/delete_session/<session_id>', methods=['POST'])
+def delete_session(session_id):
+    if not session.get('admin_logged_in'):
+        return jsonify({'error': 'Unauthorized'}), 401
+    s = Session.query.get_or_404(session_id)
+    class_id = s.class_id
+    
+    # Safely clean up associated uploaded files from disk
+    for f in s.flags:
+        delete_file_safe(f.file_path)
+        delete_file_safe(f.thumbnail_path)
+        
+    db.session.delete(s)
+    db.session.commit()
+    flash(f"Session '{s.name}' has been successfully deleted.")
+    return redirect(url_for('main.admin_class', class_id=class_id))
 
 @main.route('/admin/class/<class_id>/quiz_results')
 def admin_class_quiz_results(class_id):

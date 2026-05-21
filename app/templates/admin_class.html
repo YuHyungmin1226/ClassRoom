@@ -65,6 +65,11 @@
                 <div style="display: flex; gap: 10px; align-items: stretch;">
                     <a href="{{ url_for('main.view_session', session_id=s.id) }}" class="btn btn-secondary btn-sm"
                         style="display: flex; align-items: center; justify-content: center; margin: 0;">View Archive</a>
+                    <form method="POST" action="{{ url_for('main.delete_session', session_id=s.id) }}"
+                        class="inline-form" style="margin: 0; display: flex;" onsubmit="return confirm('세션과 작성된 모든 노드가 영구 삭제됩니다. 정말 삭제하시겠습니까?');">
+                        <button type="submit" class="btn btn-danger btn-sm"
+                            style="height: 100%; display: flex; align-items: center; justify-content: center; margin: 0;">Delete</button>
+                    </form>
                 </div>
             </li>
             {% endfor %}
