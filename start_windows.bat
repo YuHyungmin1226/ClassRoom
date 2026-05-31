@@ -36,7 +36,7 @@ if not exist "%PYTHON_EXE%" (
 
 :: 2. Install/Update Dependencies
 echo [*] Checking dependencies...
-"%PYTHON_EXE%" -m pip install -r requirements.txt --quiet
+"%PYTHON_EXE%" -m pip install -r requirements.txt --quiet --no-warn-script-location
 
 :: 3. Cleanup Port 5555
 echo [*] Cleaning up port 5555...
