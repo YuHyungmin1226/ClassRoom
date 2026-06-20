@@ -1,56 +1,44 @@
-# ClassMap & ClassWrite (Classroom Collaboration Platform)
+# ClassMap & ClassWrite - 교실 협업 플랫폼
 
-Classroom Portal is a real-time, interactive collaboration platform designed for classroom sessions. It provides two distinct modes to suit different activities:
-- **ClassMap**: A map-based activity where participants drop pins and notes on a shared map.
-- **ClassWrite**: A board-based activity where participants share thoughts in a structured post-list format.
+Classroom Portal은 실시간 대화형 교실 협업 플랫폼입니다. 수업 활동에 따라 두 가지 모드를 제공합니다:
+- **ClassMap**: 참가자가 공유 지도에 핀과 메모를 추가하는 지도 기반 활동
+- **ClassWrite**: 참가자가 구조화된 게시물 형식으로 생각을 공유하는 게시판 기반 활동
 
-## Features
-- **Real-time Collaboration**: Synchronize pins, notes, and posts across all clients instantly using Socket.IO.
-- **Dual Activity Modes**: Choose between a Map view for spatial activities or a Board view for discussions and sharing.
-- **Media Uploads**: Attach images and videos to your contributions with inline preview and playback.
-- **YouTube Integration**: Paste a YouTube URL to automatically embed the video player in your note or post.
-- **Hierarchy Management**: Administrators can manage multiple Classes and Sessions, including closing (archiving) them for review, or permanently deleting them along with their posts and uploaded media assets.
-- **Unified UI**: A sleek, modern interface with a consistent header system and responsive design across all views.
-- **Easy Network Access**: The server automatically detects local IPs, making it easy for students to join via their mobile devices on the same Wi-Fi.
+## 주요 기능
 
-### 🚀 Quick Start (Recommended)
+- **실시간 협업**: Socket.IO를 통해 모든 클라이언트 간 핀, 메모, 게시물 즉시 동기화
+- **이중 활동 모드**: 공간 활동을 위한 지도 보기 또는 토론을 위한 게시판 보기 선택
+- **미디어 업로드**: 이미지 및 동영상 첨부와 인라인 미리보기 및 재생 지원
+- **YouTube 연동**: YouTube URL 붙여넣기로 노트나 게시물에 자동 비디오 임베드
+- **계층 구조 관리**: 관리자가 여러 클래스와 세션을 관리하고 아카이브 또는 삭제 가능
+- **통합 UI**: 일관된 헤더 시스템과 반응형 디자인의 모던 인터페이스
+- **간편 네트워크 접속**: 서버가 자동으로 로컬 IP를 감지하여 같은 Wi-Fi 내 모바일 기기로 간편 접속
 
-#### For Windows Users:
-Just double-click **`start_windows.bat`**. 
-- It will automatically set up a portable Python environment and install all dependencies. No pre-installed Python required!
+## 기술 스택
 
-#### For macOS Users:
-Run **`start_mac.command`**.
-- It will set up the virtual environment and launch the server.
+- **Backend**: Python, Flask, Flask-SocketIO
+- **데이터베이스**: SQLAlchemy, SQLite
+- **Frontend**: HTML, CSS, JavaScript
+- **실시간 통신**: Socket.IO
 
----
+## 빠른 시작 (권장)
 
-### Manual Installation (Optional)
+### Windows
+`start_windows.bat`을 더블클릭하면 포터블 Python 환경을 자동으로 설정하고 모든 의존성을 설치합니다.
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/YuHyungmin1226/classmap.git
-   cd classmap
-   ```
+### macOS
+`start_mac.command`를 실행하면 가상 환경을 설정하고 서버를 실행합니다.
 
-2. **Setup environment:**
-   - **Windows**: `python -m venv venv` & `venv\Scripts\activate`
-   - **macOS/Linux**: `python3 -m venv venv` & `source venv/bin/activate`
+### 수동 설치
 
-3. **Install dependencies & Run:**
-   ```bash
-   pip install -r requirements.txt
-   python run.py
-   ```
-   The server will start on `http://localhost:5555`. 
+```bash
+# 의존성 설치
+pip install -r requirements.txt
 
-4. **Admin Access:**
-   Navigate to `/admin/login` (or select Admin via the portal). Default credentials:
-   - Password: `admin123`
-   (Note: You should change this in the Admin Menu after logging in.)
+# 서버 실행
+python app.py
+```
 
-## Technologies Used
-- **Backend**: Python, Flask, Flask-SocketIO, Flask-SQLAlchemy (SQLite)
-- **Frontend**: HTML5, Modern CSS (Flexbox/Grid), JavaScript, Socket.io client
-- **Mapping**: Leaflet.js, OpenStreetMap
-- **Image Processing**: Pillow (PIL)
+## 라이선스
+
+MIT License
