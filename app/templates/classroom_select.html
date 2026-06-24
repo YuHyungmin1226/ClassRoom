@@ -65,13 +65,30 @@
             <p>문제를 풀고 실시간으로<br>학습 결과를 확인하는 퀴즈 클래스</p>
             <div class="select-badge">입장하기</div>
         </div>
+
+        <!-- ClassGame Option -->
+        <div class="selection-card" onclick="goToGame()">
+            <div class="card-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="7" width="20" height="11" rx="4" />
+                    <path d="M7 11V14" />
+                    <path d="M5.5 12.5H8.5" />
+                    <path d="M15 12H15.01" />
+                    <path d="M18 14H18.01" />
+                </svg>
+            </div>
+            <h3>ClassGame</h3>
+            <p>모은 포인트로 즐기는<br>학습 보상 게임 모음</p>
+            <div class="select-badge">입장하기</div>
+        </div>
     </div>
     <div id="selection-config"
          data-is-admin="{{ 'true' if is_admin else 'false' }}"
          data-admin-url="{{ url_for('main.admin_dashboard') }}"
          data-classes-url="{{ url_for('main.classes') }}"
          data-quiz-url="{{ url_for('main.quiz_subjects') }}"
-         data-admin-quiz-url="{{ url_for('main.admin_quiz') }}">
+         data-admin-quiz-url="{{ url_for('main.admin_quiz') }}"
+         data-game-url="{{ url_for('main.game_menu') }}">
     </div>
 </div>
 
@@ -188,6 +205,10 @@ function goToQuiz() {
     const config = document.getElementById('selection-config').dataset;
     const isAdmin = config.isAdmin === 'true';
     location.href = isAdmin ? config.adminQuizUrl : config.quizUrl;
+}
+
+function goToGame() {
+    location.href = document.getElementById('selection-config').dataset.gameUrl;
 }
 </script>
 {% endblock %}

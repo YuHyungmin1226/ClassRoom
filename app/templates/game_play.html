@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+    .gp-wrap { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+    .gp-bar { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
+    .gp-title { font-size:1.5rem; font-weight:800; color:#1e293b; }
+    .gp-right { display:flex; align-items:center; gap:12px; }
+    .point-pill { background:#fff7ed; color:#c2410c; border:1px solid #fed7aa; padding:8px 16px; border-radius:999px; font-weight:700; }
+
+    .gp-start {
+        background:white; border:1px solid #e2e8f0; border-radius:22px; padding:50px 30px; text-align:center;
+        box-shadow:0 10px 25px -10px rgba(0,0,0,.08);
+    }
+    .gp-emoji { font-size:4rem; margin-bottom:10px; }
+    .gp-start h2 { font-size:1.8rem; font-weight:800; color:#1e293b; margin:0 0 8px; }
+    .gp-start p { color:#64748b; margin:0 0 8px; }
+    .gp-cost { font-weight:700; color:#92400e; background:#fef3c7; display:inline-block; padding:6px 14px; border-radius:8px; margin:14px 0; }
+    .gp-msg { color:#ef4444; font-weight:600; margin-top:12px; min-height:22px; }
+
+    .game-frame-box { display:none; }
+    .game-frame-box.active { display:block; }
+    #gameFrame {
+        width:100%; height:78vh; border:1px solid #e2e8f0; border-radius:16px; background:#000;
+    }
+    .frame-actions { display:flex; gap:10px; margin-top:12px; }
+    .hidden { display:none !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="gp-wrap">
+    <div class="gp-bar">
+        <div class="gp-title">{{ game.icon }} {{ game.name }}</div>
+        <div class="gp-right">
+            <span class="point-pill">⭐ <span id="myPoints">…</span> P</span>
+            <a href="{{ url_for('main.game_menu') }}" class="btn btn-secondary btn-sm">← 게임 목록</a>
+        </div>
+    </div>
+
+    <!-- 시작 화면 -->
+    <div id="startBox" class="gp-start">
+        <div class="gp-emoji">{{ game.icon }}</div>
+        <h2>{{ game.name }}</h2>
+        <p>{{ game.desc }}</p>
+        <div class="gp-cost">플레이 비용: {{ game.cost }} 포인트</div>
+        <div>
+            <button class="btn btn-primary" id="playBtn" onclick="startGame()" style="height:46px; padding:0 28px; font-size:1.05rem;">▶ 플레이하기</button>
+        </div>
+        <div class="gp-msg" id="msg"></div>
+    </div>
+
+    <!-- 게임 화면 -->
+    <div id="frameBox" class="game-frame-box">
+        <iframe id="gameFrame" title="{{ game.name }}" allow="autoplay; fullscreen"></iframe>
+        <div class="frame-actions">
+            <button class="btn btn-secondary" onclick="location.reload()">■ 게임 종료</button>
+            <span style="color:#64748b; font-size:.9rem; align-self:center;">한 판이 끝나면 다시 플레이할 때 포인트가 또 사용됩니다.</span>
+        </div>
+    </div>
+</div>
+
+<script>
+    const GAME_ID = "{{ game_id }}";
+    const COST = {{ game.cost }};
+
+    let clientId = localStorage.getItem('classroom_client_id');
+    if (!clientId) {
+        clientId = 'client_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('classroom_client_id', clientId);
+    }
+    const nickname = localStorage.getItem('classroom_nickname') || 'Player';
+
+    function refreshPoints() {
+        fetch('/api/quiz/points?client_id=' + encodeURIComponent(clientId))
+            .then(r => r.json())
+            .then(d => { document.getElementById('myPoints').innerText = d.points; })
+            .catch(() => {});
+    }
+    refreshPoints();
+
+    async function startGame() {
+        const btn = document.getElementById('playBtn');
+        const msg = document.getElementById('msg');
+        msg.innerText = '';
+        btn.disabled = true; btn.innerText = '확인 중…';
+        try {
+            const res = await fetch('/api/game/play', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ game: GAME_ID, client_id: clientId, nickname })
+            });
+            const data = await res.json();
+            if (!res.ok) { msg.innerText = data.error || '오류가 발생했습니다.'; btn.disabled = false; btn.innerText = '▶ 플레이하기'; return; }
+            if (!data.ok) {
+                msg.innerHTML = `포인트가 부족합니다. (보유 ${data.points}P / 필요 ${data.cost}P) ` +
+                    `<a href="{{ url_for('main.quiz_subjects') }}">ClassQuiz에서 포인트 모으기 →</a>`;
+                btn.disabled = false; btn.innerText = '▶ 플레이하기';
+                return;
+            }
+            // 결제 성공 → 게임 로드
+            document.getElementById('myPoints').innerText = data.remaining;
+            document.getElementById('startBox').classList.add('hidden');
+            const box = document.getElementById('frameBox');
+            box.classList.add('active');
+            document.getElementById('gameFrame').src = data.entry;
+        } catch (e) {
+            msg.innerText = '네트워크 오류: ' + e;
+            btn.disabled = false; btn.innerText = '▶ 플레이하기';
+        }
+    }
+</script>
+{% endblock %}

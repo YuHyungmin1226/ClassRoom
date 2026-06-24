@@ -11,10 +11,11 @@ from datetime import datetime
 from . import db
 from .models import (
     Admin, ClassGroup, Session, Flag,
-    SubjectQuestion, QuizAttempt, AttemptAnswer, StudentPoint,
+    SubjectQuestion, QuizAttempt, AttemptAnswer, StudentPoint, GamePlay,
 )
 from .config import Config
 from . import quiz_config
+from . import game_config
 from .quiz_logic import grade_answer
 
 main = Blueprint('main', __name__)
@@ -784,3 +785,68 @@ def admin_quiz_import(subject, grade):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
+
+# ==========================================================================
+# ClassGame: 포인트로 즐기는 게임 모음
+# ==========================================================================
+
+@main.route('/game')
+def game_menu():
+    return render_template(
+        'game_menu.html',
+        games=game_config.GAMES,
+        is_admin=session.get('admin_logged_in', False),
+    )
+
+
+@main.route('/game/<game_id>')
+def game_play(game_id):
+    if not game_config.is_valid_game(game_id):
+        return "Unknown game", 404
+    g = game_config.GAMES[game_id]
+    entry_url = url_for('static', filename=g['entry'])
+    return render_template(
+        'game_play.html',
+        game_id=game_id,
+        game=g,
+        entry_url=entry_url,
+        is_admin=session.get('admin_logged_in', False),
+    )
+
+
+@main.route('/api/game/play', methods=['POST'])
+def game_play_spend():
+    data = request.get_json(silent=True) or {}
+    game_id = data.get('game')
+    client_id = (data.get('client_id') or '').strip()
+    nickname = (data.get('nickname') or '').strip() or None
+
+    if not game_config.is_valid_game(game_id):
+        return jsonify({'error': 'invalid game'}), 400
+    if not client_id:
+        return jsonify({'error': 'client_id required'}), 400
+
+    cost = int(game_config.GAMES[game_id].get('cost', 0))
+    sp = StudentPoint.query.get(client_id)
+    points = sp.points if sp else 0
+
+    if points < cost:
+        return jsonify({
+            'ok': False, 'reason': 'insufficient',
+            'points': points, 'cost': cost, 'needed': cost - points,
+        }), 200
+
+    # 포인트 차감 + 플레이 기록
+    sp.points -= cost
+    if nickname:
+        sp.nickname = nickname
+    db.session.add(GamePlay(client_id=client_id, nickname=nickname, game=game_id, cost=cost))
+    db.session.commit()
+
+    return jsonify({
+        'ok': True,
+        'remaining': sp.points,
+        'cost': cost,
+        'entry': url_for('static', filename=game_config.GAMES[game_id]['entry']),
+    })

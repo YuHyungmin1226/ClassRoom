@@ -122,3 +122,13 @@ class StudentPoint(db.Model):
     nickname = db.Column(db.String(100), nullable=True)
     points = db.Column(db.Integer, nullable=False, default=0)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class GamePlay(db.Model):
+    """ClassGame 플레이 기록(포인트 차감 내역)."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.String(100), nullable=False, index=True)
+    nickname = db.Column(db.String(100), nullable=True)
+    game = db.Column(db.String(40), nullable=False)
+    cost = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
