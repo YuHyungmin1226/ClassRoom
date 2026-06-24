@@ -144,6 +144,7 @@ def build_result_pdf(attempt, question_map, answer_map, total_points=None):
 
     header = [Paragraph(h, styles['cell']) for h in ['#', '문제', '내 답안', '정답', '결과']]
     data = [header]
+    wrong_rows = []  # 오답 행 인덱스(채점 결과로 직접 추적)
     qids = _ordered_qids(attempt)
     for i, qid in enumerate(qids, start=1):
         q = question_map.get(qid)
@@ -153,14 +154,15 @@ def build_result_pdf(attempt, question_map, answer_map, total_points=None):
         my_ans = _option_label(q, a.response if a else None)
         correct = _option_label(q, q.correct_answer)
         ok = a.is_correct if a else False
-        mark = 'O' if ok else 'X'
         data.append([
             Paragraph(str(i), styles['cell']),
             Paragraph(_strip_md(q.question), styles['cell']),
             Paragraph(str(my_ans), styles['cell']),
             Paragraph(str(correct), styles['cell']),
-            Paragraph(mark, styles['cell']),
+            Paragraph('O' if ok else 'X', styles['cell']),
         ])
+        if not ok:
+            wrong_rows.append(len(data) - 1)
 
     table = Table(data, colWidths=[8 * mm, 78 * mm, 35 * mm, 35 * mm, 12 * mm], repeatRows=1)
     style = [
@@ -175,9 +177,8 @@ def build_result_pdf(attempt, question_map, answer_map, total_points=None):
         ('ALIGN', (4, 0), (4, -1), 'CENTER'),
     ]
     # 오답 행 배경 강조
-    for ridx in range(1, len(data)):
-        if data[ridx][4].text == 'X':
-            style.append(('BACKGROUND', (0, ridx), (-1, ridx), colors.HexColor('#fef2f2')))
+    for ridx in wrong_rows:
+        style.append(('BACKGROUND', (0, ridx), (-1, ridx), colors.HexColor('#fef2f2')))
     table.setStyle(TableStyle(style))
     elems.append(table)
 
