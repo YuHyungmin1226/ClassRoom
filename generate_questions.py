@@ -52,12 +52,18 @@ def fill(subject, grade, n):
     return len(questions)
 
 
+# 과목별 기본 자동 생성 개수(미지정 시). 영어·지식 과목은 사전 크기에서
+# 자연히 제한되므로 큰 값을 두고, 수학은 과목 간 균형을 위해 상한을 둔다.
+DEFAULT_N = 1000
+SUBJECT_N = {'math': 270}  # 큐레이션 30 + 270 ≈ 300/학년 (영어·지식 과목과 균형)
+
+
 def main():
-    n = 1000
+    explicit_n = None
     filter_subject = filter_grade = None
     args = sys.argv[1:]
     if args and args[0].isdigit():
-        n = int(args[0]); args = args[1:]
+        explicit_n = int(args[0]); args = args[1:]
     if args:
         filter_subject = args[0]
     if len(args) > 1:
@@ -65,13 +71,14 @@ def main():
 
     app = create_app()
     with app.app_context():
-        print(f"[+] 자동 생성 문제 적재 시작 (셀당 {n}개)...")
+        print("[+] 자동 생성 문제 적재 시작...")
         total = 0
         for subject, grade in SUPPORTED:
             if filter_subject and subject != filter_subject:
                 continue
             if filter_grade and grade != filter_grade:
                 continue
+            n = explicit_n if explicit_n is not None else SUBJECT_N.get(subject, DEFAULT_N)
             total += fill(subject, grade, n)
         print(f"[+] 완료! 자동 생성 문제 총 {total}개 적재.")
 
