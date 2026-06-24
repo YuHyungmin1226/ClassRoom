@@ -12,8 +12,18 @@ AUTO_TAG = 'AUTO'
 
 
 def _neg(n):
-    """음수는 괄호로 감싸 식을 명확히 표기."""
+    """음수는 괄호로 감싸 식을 명확히 표기(양수는 맨숫자). 대수식 항에 사용."""
     return f"({n})" if n < 0 else f"{n}"
+
+
+def _sgn(n):
+    """정수 사칙연산용: 양수는 (+n), 음수는 (-n)으로 부호를 명시(중1 교과서식)."""
+    return f"(+{n})" if n > 0 else f"({n})"
+
+
+def _nz(lo, hi, exclude=(0,)):
+    """[lo, hi]에서 exclude에 든 값을 제외한 정수 하나를 무작위로 반환."""
+    return random.choice([x for x in range(lo, hi + 1) if x not in exclude])
 
 
 def _linexpr(m, n, var='x'):
@@ -68,36 +78,36 @@ def _mk(unit, difficulty, question, answer, q_type='short', options=None, explan
 # ----------------------------- 중1 -----------------------------
 
 def _g1_add():
-    a, b = random.randint(-20, 20), random.randint(-20, 20)
-    return _mk("정수와 유리수", 1, f"{_neg(a)} + {_neg(b)} 를 계산하면?", a + b)
+    a, b = _nz(-20, 20), _nz(-20, 20)
+    return _mk("정수와 유리수", 1, f"{_sgn(a)} + {_sgn(b)} 를 계산하면?", a + b)
 
 
 def _g1_sub():
-    a, b = random.randint(-20, 20), random.randint(-20, 20)
-    return _mk("정수와 유리수", 1, f"{_neg(a)} - {_neg(b)} 를 계산하면?", a - b)
+    a, b = _nz(-20, 20), _nz(-20, 20)
+    return _mk("정수와 유리수", 1, f"{_sgn(a)} - {_sgn(b)} 를 계산하면?", a - b)
 
 
 def _g1_mul():
-    a, b = random.randint(-12, 12), random.randint(-12, 12)
-    return _mk("정수와 유리수", 1, f"{_neg(a)} × {_neg(b)} 를 계산하면?", a * b)
+    a, b = _nz(-12, 12, (-1, 0, 1)), _nz(-12, 12, (-1, 0, 1))
+    return _mk("정수와 유리수", 1, f"{_sgn(a)} × {_sgn(b)} 를 계산하면?", a * b)
 
 
 def _g1_div():
-    b = random.choice([x for x in range(-12, 13) if x != 0])
-    q = random.randint(-12, 12)
+    b = _nz(-12, 12, (-1, 0, 1))   # 나누는 수: 0, ±1 제외(자명한 나눗셈 방지)
+    q = _nz(-12, 12)               # 몫: 0 제외(피제수 0 방지)
     a = b * q
-    return _mk("정수와 유리수", 2, f"{_neg(a)} ÷ {_neg(b)} 를 계산하면?", q)
+    return _mk("정수와 유리수", 2, f"{_sgn(a)} ÷ {_sgn(b)} 를 계산하면?", q)
 
 
 def _g1_pow():
-    base = random.randint(-5, 5)
+    base = _nz(-5, 5, (-1, 0, 1))  # 밑: 0, ±1 제외(자명한 거듭제곱 방지)
     e = random.choice([2, 3])
     sym = '²' if e == 2 else '³'
     return _mk("정수와 유리수", 2, f"{_neg(base)}{sym} 을 계산하면?", base ** e)
 
 
 def _g1_abs():
-    a = random.randint(-30, 30)
+    a = _nz(-30, 30)
     return _mk("정수와 유리수", 1, f"|{a}| 의 값은?", abs(a))
 
 
