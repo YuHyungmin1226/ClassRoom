@@ -17,17 +17,25 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from app import create_app, db
 from app.models import SubjectQuestion
 from app.quiz_generators import generate, AUTO_TAG
+from app.quiz_knowledge import generate_knowledge
 
 # 현재 자동 생성을 지원하는 (과목, 학년)
+KNOWLEDGE_SUBJECTS = ('kor', 'sci', 'social')
 SUPPORTED = [
     ('math', 1), ('math', 2), ('math', 3),
     ('eng', 1), ('eng', 2), ('eng', 3),
+    ('kor', 1), ('kor', 2), ('kor', 3),
+    ('sci', 1), ('sci', 2), ('sci', 3),
+    ('social', 1), ('social', 2), ('social', 3),
 ]
 
 
 def fill(subject, grade, n):
     SubjectQuestion.query.filter_by(subject=subject, grade=grade, standard_code=AUTO_TAG).delete()
-    questions = generate(subject, grade, n)
+    if subject in KNOWLEDGE_SUBJECTS:
+        questions = generate_knowledge(subject, grade, n)
+    else:
+        questions = generate(subject, grade, n)
     for q in questions:
         db.session.add(SubjectQuestion(
             subject=subject, grade=grade,
