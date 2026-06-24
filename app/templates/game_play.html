@@ -44,6 +44,7 @@
         <h2>{{ game.name }}</h2>
         <p>{{ game.desc }}</p>
         <div class="gp-cost">플레이 비용: {{ game.cost }} 포인트</div>
+        {% if is_admin %}<div style="color:#16a34a; font-weight:700; margin-bottom:10px;">🛡️ 관리자 계정 — 포인트 차감 없이 무제한 플레이</div>{% endif %}
         <div>
             <button class="btn btn-primary" id="playBtn" onclick="startGame()" style="height:46px; padding:0 28px; font-size:1.05rem;">▶ 플레이하기</button>
         </div>
@@ -97,8 +98,10 @@
                 btn.disabled = false; btn.innerText = '▶ 플레이하기';
                 return;
             }
-            // 결제 성공 → 게임 로드
-            document.getElementById('myPoints').innerText = data.remaining;
+            // 결제(또는 관리자) 확인 → 게임 로드
+            if (data.remaining !== null && data.remaining !== undefined) {
+                document.getElementById('myPoints').innerText = data.remaining;
+            }
             document.getElementById('startBox').classList.add('hidden');
             const box = document.getElementById('frameBox');
             box.classList.add('active');

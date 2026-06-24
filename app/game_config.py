@@ -9,8 +9,8 @@ GAMES = {
         'name': 'LikeDIA',
         'desc': '디아블로 스타일 액션 RPG. 몬스터를 처치하고 장비를 파밍하세요.',
         'icon': '⚔️',
-        'cost': 1,  # 1회 플레이에 필요한 포인트
-        'entry': 'games/likedia/index.html',  # app/static 기준 경로
+        'cost': 1,        # 1회 플레이에 필요한 포인트
+        'dir': 'likedia',  # app/protected_games 아래 폴더명(직접 접근 불가, 결제 검증 후 서빙)
     },
 }
 

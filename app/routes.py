@@ -5,6 +5,7 @@ import os
 import uuid
 import io
 import json
+import time
 import random
 import zipfile
 from datetime import datetime
@@ -788,31 +789,56 @@ def admin_quiz_import(subject, grade):
 
 
 # ==========================================================================
-# ClassGame: 포인트로 즐기는 게임 모음
+# ClassGame: 포인트로 즐기는 게임 모음 (직접 접근 차단 + 결제 검증)
 # ==========================================================================
+
+PROTECTED_GAMES_DIR = os.path.join(os.path.dirname(__file__), 'protected_games')
+GAME_PASS_TTL = 6 * 3600  # 결제 후 플레이 가능 시간(초)
+
+
+def _is_admin():
+    return bool(session.get('admin_logged_in'))
+
+
+def _grant_game_pass(game_id):
+    """현재 세션에 해당 게임 플레이 권한을 부여(만료 시각 기록)."""
+    passes = dict(session.get('game_pass') or {})
+    passes[game_id] = time.time() + GAME_PASS_TTL
+    session['game_pass'] = passes
+    session.modified = True
+
+
+def _has_game_access(game_id):
+    """관리자이거나, 결제로 받은 유효한 플레이 권한이 있을 때만 True."""
+    if _is_admin():
+        return True
+    exp = (session.get('game_pass') or {}).get(game_id)
+    return bool(exp and exp > time.time())
+
 
 @main.route('/game')
 def game_menu():
-    return render_template(
-        'game_menu.html',
-        games=game_config.GAMES,
-        is_admin=session.get('admin_logged_in', False),
-    )
+    return render_template('game_menu.html', games=game_config.GAMES, is_admin=_is_admin())
 
 
 @main.route('/game/<game_id>')
 def game_play(game_id):
     if not game_config.is_valid_game(game_id):
         return "Unknown game", 404
-    g = game_config.GAMES[game_id]
-    entry_url = url_for('static', filename=g['entry'])
-    return render_template(
-        'game_play.html',
-        game_id=game_id,
-        game=g,
-        entry_url=entry_url,
-        is_admin=session.get('admin_logged_in', False),
-    )
+    return render_template('game_play.html', game_id=game_id,
+                           game=game_config.GAMES[game_id], is_admin=_is_admin())
+
+
+@main.route('/play/<game_id>/', defaults={'subpath': 'index.html'})
+@main.route('/play/<game_id>/<path:subpath>')
+def play_game_file(game_id, subpath):
+    """게임 정적 파일을 결제(또는 관리자) 검증 후에만 서빙한다."""
+    if not game_config.is_valid_game(game_id):
+        return "Unknown game", 404
+    if not _has_game_access(game_id):
+        return "플레이 권한이 없습니다. ClassGame에서 포인트로 플레이를 시작하세요.", 403
+    base = os.path.join(PROTECTED_GAMES_DIR, game_config.GAMES[game_id]['dir'])
+    return send_from_directory(base, subpath)
 
 
 @main.route('/api/game/play', methods=['POST'])
@@ -824,29 +850,56 @@ def game_play_spend():
 
     if not game_config.is_valid_game(game_id):
         return jsonify({'error': 'invalid game'}), 400
+
+    entry = url_for('main.play_game_file', game_id=game_id)
+    cost = int(game_config.GAMES[game_id].get('cost', 0))
+
+    # 관리자: 포인트 차감 없이 무제한 플레이
+    if _is_admin():
+        _grant_game_pass(game_id)
+        return jsonify({'ok': True, 'admin': True, 'remaining': None, 'cost': 0, 'entry': entry})
+
     if not client_id:
         return jsonify({'error': 'client_id required'}), 400
 
-    cost = int(game_config.GAMES[game_id].get('cost', 0))
     sp = StudentPoint.query.get(client_id)
     points = sp.points if sp else 0
-
     if points < cost:
         return jsonify({
             'ok': False, 'reason': 'insufficient',
             'points': points, 'cost': cost, 'needed': cost - points,
         }), 200
 
-    # 포인트 차감 + 플레이 기록
     sp.points -= cost
     if nickname:
         sp.nickname = nickname
     db.session.add(GamePlay(client_id=client_id, nickname=nickname, game=game_id, cost=cost))
     db.session.commit()
+    _grant_game_pass(game_id)
 
-    return jsonify({
-        'ok': True,
-        'remaining': sp.points,
-        'cost': cost,
-        'entry': url_for('static', filename=game_config.GAMES[game_id]['entry']),
-    })
+    return jsonify({'ok': True, 'remaining': sp.points, 'cost': cost, 'entry': entry})
+
+
+@main.route('/admin/grant_points', methods=['POST'])
+def admin_grant_points():
+    """관리자: 모든 학생(StudentPoint 보유자)에게 포인트를 일괄 지급."""
+    if not _is_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    amount_raw = request.form.get('amount')
+    if amount_raw is None:
+        amount_raw = (request.get_json(silent=True) or {}).get('amount')
+    try:
+        amount = int(amount_raw)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'invalid amount'}), 400
+    if amount == 0:
+        return jsonify({'error': 'amount must be non-zero'}), 400
+
+    count = StudentPoint.query.update(
+        {StudentPoint.points: StudentPoint.points + amount}, synchronize_session=False)
+    if amount < 0:  # 차감 시 0 미만 방지
+        StudentPoint.query.filter(StudentPoint.points < 0).update(
+            {StudentPoint.points: 0}, synchronize_session=False)
+    db.session.commit()
+    return jsonify({'ok': True, 'amount': amount, 'students': count})
