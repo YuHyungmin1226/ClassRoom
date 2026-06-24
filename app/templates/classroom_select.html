@@ -51,7 +51,7 @@
         </div>
 
         <!-- ClassQuiz Option -->
-        <div class="selection-card" onclick="goToDashboard('classquiz')">
+        <div class="selection-card" onclick="goToQuiz()">
             <div class="card-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M9 11L12 14L22 4" />
@@ -66,10 +66,12 @@
             <div class="select-badge">입장하기</div>
         </div>
     </div>
-    <div id="selection-config" 
-         data-is-admin="{{ 'true' if is_admin else 'false' }}" 
-         data-admin-url="{{ url_for('main.admin_dashboard') }}" 
-         data-classes-url="{{ url_for('main.classes') }}">
+    <div id="selection-config"
+         data-is-admin="{{ 'true' if is_admin else 'false' }}"
+         data-admin-url="{{ url_for('main.admin_dashboard') }}"
+         data-classes-url="{{ url_for('main.classes') }}"
+         data-quiz-url="{{ url_for('main.quiz_subjects') }}"
+         data-admin-quiz-url="{{ url_for('main.admin_quiz') }}">
     </div>
 </div>
 
@@ -180,6 +182,12 @@ function goToDashboard(type) {
         url = config.classesUrl + "?type=" + type;
     }
     location.href = url;
+}
+
+function goToQuiz() {
+    const config = document.getElementById('selection-config').dataset;
+    const isAdmin = config.isAdmin === 'true';
+    location.href = isAdmin ? config.adminQuizUrl : config.quizUrl;
 }
 </script>
 {% endblock %}

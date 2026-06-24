@@ -4,11 +4,18 @@ from PIL import Image
 import os
 import uuid
 import io
+import json
+import random
 import zipfile
 from datetime import datetime
 from . import db
-from .models import Admin, ClassGroup, Session, Flag
+from .models import (
+    Admin, ClassGroup, Session, Flag,
+    SubjectQuestion, QuizAttempt, AttemptAnswer, StudentPoint,
+)
 from .config import Config
+from . import quiz_config
+from .quiz_logic import grade_answer
 
 main = Blueprint('main', __name__)
 
@@ -412,8 +419,368 @@ def upload_file():
                 print(f"Error creating thumbnail: {e}")
                 
         return jsonify({
-            'success': True, 
+            'success': True,
             'file_path': f"uploads/{unique_filename}",
             'thumbnail_path': thumbnail_path
         })
     return jsonify({'error': 'Invalid file type'}), 400
+
+
+# ==========================================================================
+# ClassQuiz: 과목별 문제 풀(pool) 시스템
+# ==========================================================================
+
+def _get_points(client_id):
+    if not client_id:
+        return 0
+    sp = StudentPoint.query.get(client_id)
+    return sp.points if sp else 0
+
+
+def _pool_counts():
+    """{subject: {grade: count}} 형태의 풀 문항 수."""
+    counts = {s: {g: 0 for g in quiz_config.GRADES} for s in quiz_config.SUBJECTS}
+    rows = db.session.query(
+        SubjectQuestion.subject, SubjectQuestion.grade, db.func.count(SubjectQuestion.id)
+    ).group_by(SubjectQuestion.subject, SubjectQuestion.grade).all()
+    for subject, grade, cnt in rows:
+        if subject in counts and grade in counts[subject]:
+            counts[subject][grade] = cnt
+    return counts
+
+
+@main.route('/quiz')
+def quiz_subjects():
+    counts = _pool_counts()
+    subject_totals = {s: sum(g.values()) for s, g in counts.items()}
+    return render_template(
+        'quiz_subjects.html',
+        subjects=quiz_config.SUBJECTS,
+        icons=quiz_config.SUBJECT_ICONS,
+        subject_totals=subject_totals,
+        is_admin=session.get('admin_logged_in', False),
+    )
+
+
+@main.route('/quiz/<subject>')
+def quiz_grades(subject):
+    if not quiz_config.is_valid_subject(subject):
+        return "Unknown subject", 404
+    counts = _pool_counts().get(subject, {})
+    return render_template(
+        'quiz_grades.html',
+        subject=subject,
+        subject_name=quiz_config.SUBJECTS[subject],
+        icon=quiz_config.SUBJECT_ICONS.get(subject, '📘'),
+        grades=quiz_config.GRADES,
+        counts=counts,
+        per_set=quiz_config.QUESTIONS_PER_SET,
+        is_admin=session.get('admin_logged_in', False),
+    )
+
+
+@main.route('/quiz/<subject>/<int:grade>')
+def quiz_take(subject, grade):
+    if not quiz_config.is_valid_subject(subject) or not quiz_config.is_valid_grade(grade):
+        return "Invalid subject or grade", 404
+    return render_template(
+        'quiz_take.html',
+        subject=subject,
+        subject_name=quiz_config.SUBJECTS[subject],
+        grade=grade,
+        grade_name=quiz_config.GRADES[grade],
+        per_set=quiz_config.QUESTIONS_PER_SET,
+        is_admin=session.get('admin_logged_in', False),
+    )
+
+
+def _serialize_question_for_client(q):
+    """채점 정보(정답/해설)를 제외하고 클라이언트에 전달."""
+    options = []
+    if q.options:
+        options = [o.strip() for o in q.options.split('|') if o.strip()]
+    return {
+        'id': q.id,
+        'q_type': q.q_type,
+        'question': q.question,
+        'options': options,
+        'unit': q.unit,
+        'difficulty': q.difficulty,
+    }
+
+
+@main.route('/api/quiz/start', methods=['POST'])
+def quiz_start():
+    data = request.get_json(silent=True) or {}
+    subject = data.get('subject')
+    grade = data.get('grade')
+    client_id = (data.get('client_id') or '').strip()
+    nickname = (data.get('nickname') or '').strip() or 'Student'
+
+    if not quiz_config.is_valid_subject(subject) or not quiz_config.is_valid_grade(grade):
+        return jsonify({'error': 'Invalid subject or grade'}), 400
+    if not client_id:
+        return jsonify({'error': 'client_id required'}), 400
+    grade = int(grade)
+
+    pool = SubjectQuestion.query.filter_by(subject=subject, grade=grade).all()
+    if not pool:
+        return jsonify({'error': 'no_questions', 'message': '아직 등록된 문제가 없습니다.'}), 404
+
+    k = min(quiz_config.QUESTIONS_PER_SET, len(pool))
+    chosen = random.sample(pool, k)
+
+    attempt = QuizAttempt(
+        client_id=client_id,
+        nickname=nickname,
+        subject=subject,
+        grade=grade,
+        question_ids=json.dumps([q.id for q in chosen]),
+        total=k,
+    )
+    db.session.add(attempt)
+    db.session.commit()
+
+    return jsonify({
+        'attempt_id': attempt.id,
+        'subject': subject,
+        'grade': grade,
+        'total': k,
+        'questions': [_serialize_question_for_client(q) for q in chosen],
+    })
+
+
+@main.route('/api/quiz/submit', methods=['POST'])
+def quiz_submit():
+    data = request.get_json(silent=True) or {}
+    attempt_id = data.get('attempt_id')
+    client_id = (data.get('client_id') or '').strip()
+    answers = data.get('answers') or {}  # {question_id: response}
+    nickname = (data.get('nickname') or '').strip()
+
+    attempt = QuizAttempt.query.get(attempt_id)
+    if not attempt:
+        return jsonify({'error': 'attempt not found'}), 404
+    if attempt.client_id != client_id:
+        return jsonify({'error': 'forbidden'}), 403
+    if attempt.completed:
+        return jsonify({'error': 'already_completed'}), 409
+
+    try:
+        qids = json.loads(attempt.question_ids)
+    except (TypeError, ValueError):
+        qids = []
+    questions = {q.id: q for q in SubjectQuestion.query.filter(SubjectQuestion.id.in_(qids)).all()}
+
+    results = []
+    correct_count = 0
+    for qid in qids:
+        q = questions.get(qid)
+        if not q:
+            continue
+        resp = answers.get(str(qid), answers.get(qid))
+        is_correct = grade_answer(q, resp)
+        if is_correct:
+            correct_count += 1
+        db.session.add(AttemptAnswer(
+            attempt_id=attempt.id, question_id=qid,
+            response=(str(resp) if resp is not None else None), is_correct=is_correct,
+        ))
+        results.append({
+            'id': q.id,
+            'question': q.question,
+            'options': [o.strip() for o in (q.options or '').split('|') if o.strip()],
+            'q_type': q.q_type,
+            'your_answer': resp,
+            'correct_answer': q.correct_answer,
+            'explanation': q.explanation,
+            'is_correct': is_correct,
+        })
+
+    total = attempt.total or len(qids)
+    score = round((correct_count / total) * 100) if total else 0
+    is_perfect = (total > 0 and correct_count == total)
+
+    attempt.correct_count = correct_count
+    attempt.score = score
+    attempt.is_perfect = is_perfect
+    attempt.completed = True
+    if nickname:
+        attempt.nickname = nickname
+
+    # 포인트 지급: 정식 세트(오답 재풀이 아님)에서 만점일 때 1회
+    point_awarded_now = False
+    if is_perfect and not attempt.is_retry and not attempt.point_awarded:
+        sp = StudentPoint.query.get(client_id)
+        if not sp:
+            sp = StudentPoint(client_id=client_id, nickname=attempt.nickname, points=0)
+            db.session.add(sp)
+        sp.points += 1
+        sp.nickname = attempt.nickname
+        attempt.point_awarded = True
+        point_awarded_now = True
+
+    db.session.commit()
+
+    return jsonify({
+        'attempt_id': attempt.id,
+        'score': score,
+        'correct_count': correct_count,
+        'total': total,
+        'is_perfect': is_perfect,
+        'point_awarded': point_awarded_now,
+        'total_points': _get_points(client_id),
+        'wrong_count': total - correct_count,
+        'results': results,
+    })
+
+
+@main.route('/api/quiz/retry_wrong', methods=['POST'])
+def quiz_retry_wrong():
+    data = request.get_json(silent=True) or {}
+    attempt_id = data.get('attempt_id')
+    client_id = (data.get('client_id') or '').strip()
+
+    src = QuizAttempt.query.get(attempt_id)
+    if not src:
+        return jsonify({'error': 'attempt not found'}), 404
+    if src.client_id != client_id:
+        return jsonify({'error': 'forbidden'}), 403
+
+    wrong_qids = [a.question_id for a in src.answers if not a.is_correct]
+    if not wrong_qids:
+        return jsonify({'error': 'no_wrong', 'message': '틀린 문제가 없습니다.'}), 400
+
+    questions = {q.id: q for q in SubjectQuestion.query.filter(SubjectQuestion.id.in_(wrong_qids)).all()}
+    ordered = [questions[qid] for qid in wrong_qids if qid in questions]
+
+    attempt = QuizAttempt(
+        client_id=client_id,
+        nickname=src.nickname,
+        subject=src.subject,
+        grade=src.grade,
+        question_ids=json.dumps([q.id for q in ordered]),
+        total=len(ordered),
+        is_retry=True,
+    )
+    db.session.add(attempt)
+    db.session.commit()
+
+    return jsonify({
+        'attempt_id': attempt.id,
+        'subject': src.subject,
+        'grade': src.grade,
+        'total': len(ordered),
+        'questions': [_serialize_question_for_client(q) for q in ordered],
+    })
+
+
+@main.route('/quiz/attempt/<int:attempt_id>/pdf')
+def quiz_attempt_pdf(attempt_id):
+    attempt = QuizAttempt.query.get_or_404(attempt_id)
+    client_id = (request.args.get('client_id') or '').strip()
+    if not session.get('admin_logged_in') and attempt.client_id != client_id:
+        return "Forbidden", 403
+
+    from .quiz_pdf import build_result_pdf
+
+    try:
+        qids = json.loads(attempt.question_ids)
+    except (TypeError, ValueError):
+        qids = []
+    question_map = {q.id: q for q in SubjectQuestion.query.filter(SubjectQuestion.id.in_(qids)).all()}
+    answer_map = {a.question_id: a for a in attempt.answers}
+
+    pdf = build_result_pdf(attempt, question_map, answer_map, total_points=_get_points(attempt.client_id))
+
+    subject_name = quiz_config.SUBJECTS.get(attempt.subject, attempt.subject)
+    filename = f"quiz_result_{subject_name}_{attempt.grade}_{attempt.id}.pdf"
+    return send_file(pdf, mimetype='application/pdf', as_attachment=True, download_name=filename)
+
+
+@main.route('/api/quiz/points')
+def quiz_points():
+    client_id = (request.args.get('client_id') or '').strip()
+    return jsonify({'points': _get_points(client_id)})
+
+
+# --- ClassQuiz 관리자: 문제 풀 관리 ---
+
+@main.route('/admin/quiz')
+def admin_quiz():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('main.admin_login'))
+    counts = _pool_counts()
+    return render_template(
+        'admin_quiz.html',
+        subjects=quiz_config.SUBJECTS,
+        icons=quiz_config.SUBJECT_ICONS,
+        grades=quiz_config.GRADES,
+        counts=counts,
+        per_set=quiz_config.QUESTIONS_PER_SET,
+    )
+
+
+@main.route('/admin/quiz/<subject>/<int:grade>/export')
+def admin_quiz_export(subject, grade):
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('main.admin_login'))
+    if not quiz_config.is_valid_subject(subject) or not quiz_config.is_valid_grade(grade):
+        return "Invalid", 404
+
+    from openpyxl import Workbook
+    questions = SubjectQuestion.query.filter_by(subject=subject, grade=grade).all()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Questions"
+    ws.append(['unit', 'standard_code', 'difficulty', 'q_type', 'question', 'options(|)', 'correct_answer', 'explanation'])
+    for q in questions:
+        ws.append([q.unit, q.standard_code, q.difficulty, q.q_type, q.question, q.options, q.correct_answer, q.explanation])
+
+    memory_file = io.BytesIO()
+    wb.save(memory_file)
+    memory_file.seek(0)
+    filename = f"pool_{subject}_{grade}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    return send_file(memory_file,
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                     as_attachment=True, download_name=filename)
+
+
+@main.route('/admin/quiz/<subject>/<int:grade>/import', methods=['POST'])
+def admin_quiz_import(subject, grade):
+    if not session.get('admin_logged_in'):
+        return jsonify({'error': 'Unauthorized'}), 401
+    if not quiz_config.is_valid_subject(subject) or not quiz_config.is_valid_grade(grade):
+        return jsonify({'error': 'Invalid subject or grade'}), 400
+    if 'file' not in request.files or request.files['file'].filename == '':
+        return jsonify({'error': 'No file'}), 400
+
+    from openpyxl import load_workbook
+    replace = request.form.get('replace') == '1'
+    try:
+        wb = load_workbook(request.files['file'])
+        ws = wb.active
+        if replace:
+            SubjectQuestion.query.filter_by(subject=subject, grade=grade).delete()
+
+        added = 0
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            # unit, standard_code, difficulty, q_type, question, options, correct_answer, explanation
+            if not row or not row[4]:
+                continue
+            db.session.add(SubjectQuestion(
+                subject=subject, grade=grade,
+                unit=row[0], standard_code=row[1],
+                difficulty=int(row[2]) if row[2] else 2,
+                q_type=(row[3] or 'choice'),
+                question=str(row[4]),
+                options=(str(row[5]) if row[5] else None),
+                correct_answer=str(row[6]) if row[6] is not None else '',
+                explanation=(str(row[7]) if row[7] else None),
+            ))
+            added += 1
+        db.session.commit()
+        return jsonify({'success': True, 'added': added})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500

@@ -67,3 +67,58 @@ class QuizResponse(db.Model):
     response = db.Column(db.Text, nullable=False)
     is_correct = db.Column(db.Boolean, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# --- ClassQuiz: 과목별 문제 풀(pool) 시스템 ---
+
+class SubjectQuestion(db.Model):
+    """과목별 사전 제작 문제 풀."""
+    id = db.Column(db.Integer, primary_key=True)
+    subject = db.Column(db.String(20), nullable=False, index=True)   # kor/eng/math/social/sci
+    grade = db.Column(db.Integer, nullable=False, index=True)        # 1, 2, 3
+    unit = db.Column(db.String(120), nullable=True)                  # 단원
+    standard_code = db.Column(db.String(40), nullable=True)          # 성취기준 코드 (예: [9국01-01])
+    difficulty = db.Column(db.Integer, nullable=False, default=2)    # 1(하)~3(상)
+    q_type = db.Column(db.String(20), nullable=False, default='choice')  # 'choice', 'short'
+    question = db.Column(db.Text, nullable=False)
+    options = db.Column(db.Text, nullable=True)        # 객관식 보기 ('|' 구분)
+    correct_answer = db.Column(db.Text, nullable=False)  # 객관식은 번호(예: "2"), 단답은 텍스트
+    explanation = db.Column(db.Text, nullable=True)     # 해설
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class QuizAttempt(db.Model):
+    """학생 1회 풀이(30문제 세트)."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.String(100), nullable=False, index=True)
+    nickname = db.Column(db.String(100), nullable=True)
+    subject = db.Column(db.String(20), nullable=False)
+    grade = db.Column(db.Integer, nullable=False)
+    question_ids = db.Column(db.Text, nullable=False)  # 출제된 문항 id 목록(JSON)
+    total = db.Column(db.Integer, nullable=False, default=0)
+    correct_count = db.Column(db.Integer, nullable=False, default=0)
+    score = db.Column(db.Integer, nullable=False, default=0)  # 0~100
+    is_perfect = db.Column(db.Boolean, nullable=False, default=False)
+    point_awarded = db.Column(db.Boolean, nullable=False, default=False)
+    is_retry = db.Column(db.Boolean, nullable=False, default=False)  # 오답 재풀이 여부
+    completed = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    answers = db.relationship('AttemptAnswer', backref='attempt', lazy=True, cascade='all, delete-orphan')
+
+
+class AttemptAnswer(db.Model):
+    """시도 내 문항별 답안/채점 결과."""
+    id = db.Column(db.Integer, primary_key=True)
+    attempt_id = db.Column(db.Integer, db.ForeignKey('quiz_attempt.id'), nullable=False, index=True)
+    question_id = db.Column(db.Integer, db.ForeignKey('subject_question.id'), nullable=False)
+    response = db.Column(db.Text, nullable=True)
+    is_correct = db.Column(db.Boolean, nullable=False, default=False)
+
+
+class StudentPoint(db.Model):
+    """기기(client_id)별 누적 포인트."""
+    client_id = db.Column(db.String(100), primary_key=True)
+    nickname = db.Column(db.String(100), nullable=True)
+    points = db.Column(db.Integer, nullable=False, default=0)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+    .quiz-wrap { max-width: 820px; margin: 24px auto; padding: 20px; }
+    .quiz-bar {
+        display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;
+    }
+    .quiz-bar .title { font-size: 1.2rem; font-weight: 800; color: #1e293b; }
+    .quiz-bar .who { font-size: 0.9rem; color: #64748b; }
+    .progress-track { width: 100%; height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden; margin-bottom: 8px; }
+    .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg,#6366f1,#a855f7); transition: width .3s ease; }
+    .status-line { text-align: center; color: #64748b; font-weight: 600; margin-bottom: 18px; }
+
+    .q-card {
+        background: white; border: 1px solid #e2e8f0; border-radius: 22px; padding: 30px;
+        box-shadow: 0 10px 25px -10px rgba(0,0,0,.08); margin-bottom: 20px;
+    }
+    .q-meta { font-size: .8rem; color: #94a3b8; margin-bottom: 8px; }
+    .q-title { font-size: 1.3rem; font-weight: 700; color: #1e293b; line-height: 1.5; margin-bottom: 22px; }
+    .q-title img { max-width: 100%; border-radius: 12px; margin: 10px 0; }
+
+    .opts { display: grid; gap: 12px; }
+    .opt {
+        display: flex; align-items: center; gap: 14px; padding: 15px 18px;
+        border: 2px solid #e2e8f0; border-radius: 14px; background: white; cursor: pointer;
+        text-align: left; font-size: 1.05rem; transition: all .15s ease;
+    }
+    .opt:hover { border-color: #6366f1; background: #f8fafc; }
+    .opt.sel { border-color: #6366f1; background: #e0e7ff; color: #4338ca; }
+    .opt .dot { width: 22px; height: 22px; border: 2px solid #cbd5e1; border-radius: 50%; flex-shrink: 0; display:flex; align-items:center; justify-content:center; }
+    .opt.sel .dot { border-color: #6366f1; background: #6366f1; }
+    .opt.sel .dot::after { content:''; width:8px; height:8px; background:white; border-radius:50%; }
+
+    .short-input { width: 100%; padding: 14px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1.05rem; }
+    .short-input:focus { border-color: #6366f1; outline: none; }
+
+    .nav-row { display: flex; justify-content: space-between; gap: 12px; }
+
+    /* 결과 화면 */
+    .result-hero { text-align: center; padding: 40px 24px; }
+    .result-score { font-size: 3.4rem; font-weight: 900; color: #6366f1; }
+    .result-msg { font-size: 1.1rem; color: #64748b; margin-top: 6px; }
+    .point-banner {
+        margin: 20px auto 0; max-width: 420px; background: #fff7ed; color: #c2410c;
+        border: 1px solid #fed7aa; border-radius: 16px; padding: 16px; font-weight: 700;
+    }
+    .result-actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 26px; }
+    .review-item {
+        border: 1px solid #e2e8f0; border-left: 5px solid #cbd5e1; border-radius: 12px;
+        padding: 16px 18px; margin-bottom: 12px; background: white;
+    }
+    .review-item.correct { border-left-color: #10b981; }
+    .review-item.wrong { border-left-color: #ef4444; }
+    .review-q { font-weight: 700; color: #1e293b; margin-bottom: 8px; }
+    .review-q img { max-width: 100%; border-radius: 8px; }
+    .review-line { font-size: .92rem; margin: 3px 0; }
+    .tag-correct { color: #10b981; font-weight: 700; }
+    .tag-wrong { color: #ef4444; font-weight: 700; }
+    .review-exp { margin-top: 8px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; font-size: .88rem; color: #475569; }
+    .hidden { display: none !important; }
+    .center-state { text-align:center; color:#64748b; padding: 50px 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="quiz-wrap">
+    <div class="quiz-bar">
+        <div class="title">{{ icon if icon else '📝' }} {{ subject_name }} · {{ grade_name }}</div>
+        <div class="who" id="whoLine"></div>
+    </div>
+
+    <!-- 풀이 영역 -->
+    <div id="solveArea">
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="status-line"><span id="curIdx">0</span> / <span id="totalCnt">0</span></div>
+        <div id="qContainer">
+            <div class="center-state">문제를 불러오는 중…</div>
+        </div>
+        <div class="nav-row">
+            <button class="btn btn-secondary" id="prevBtn" onclick="go(-1)" disabled>이전</button>
+            <button class="btn btn-primary" id="nextBtn" onclick="go(1)" disabled>다음</button>
+        </div>
+    </div>
+
+    <!-- 결과 영역 -->
+    <div id="resultArea" class="hidden"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+<script>
+    const SUBJECT = "{{ subject }}";
+    const GRADE = {{ grade }};
+
+    function renderMd(t) {
+        if (!t) return '';
+        marked.setOptions({ breaks: true, gfm: true });
+        return DOMPurify.sanitize(marked.parse(t));
+    }
+
+    let clientId = localStorage.getItem('classroom_client_id');
+    if (!clientId) {
+        clientId = 'client_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('classroom_client_id', clientId);
+    }
+    const nickname = localStorage.getItem('classroom_nickname') || 'Student';
+    document.getElementById('whoLine').innerText = '응시자: ' + nickname;
+
+    let attemptId = null;
+    let questions = [];
+    let answers = {};      // qid -> response
+    let curIdx = 0;
+
+    async function startAttempt(retryFrom) {
+        try {
+            let resp;
+            if (retryFrom) {
+                resp = await fetch('/api/quiz/retry_wrong', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ attempt_id: retryFrom, client_id: clientId })
+                });
+            } else {
+                resp = await fetch('/api/quiz/start', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ subject: SUBJECT, grade: GRADE, client_id: clientId, nickname })
+                });
+            }
+            const data = await resp.json();
+            if (!resp.ok) {
+                document.getElementById('qContainer').innerHTML =
+                    `<div class="center-state">${data.message || data.error || '오류가 발생했습니다.'}</div>`;
+                return;
+            }
+            attemptId = data.attempt_id;
+            questions = data.questions;
+            answers = {};
+            curIdx = 0;
+            document.getElementById('totalCnt').innerText = questions.length;
+            document.getElementById('resultArea').classList.add('hidden');
+            document.getElementById('solveArea').classList.remove('hidden');
+            renderQuestion();
+        } catch (e) {
+            document.getElementById('qContainer').innerHTML =
+                `<div class="center-state">네트워크 오류: ${e}</div>`;
+        }
+    }
+
+    function renderQuestion() {
+        const q = questions[curIdx];
+        const container = document.getElementById('qContainer');
+        document.getElementById('curIdx').innerText = curIdx + 1;
+        document.getElementById('progressFill').style.width = ((curIdx + 1) / questions.length * 100) + '%';
+
+        let html = `<div class="q-card">
+            <div class="q-meta">${q.unit ? q.unit + ' · ' : ''}난이도 ${'★'.repeat(q.difficulty || 1)}</div>
+            <div class="q-title">${renderMd(q.question)}</div>`;
+
+        if (q.q_type === 'choice') {
+            const opts = (q.options && q.options.length) ? q.options : ['1','2','3','4'];
+            html += '<div class="opts">';
+            opts.forEach((opt, i) => {
+                const val = (i + 1).toString();
+                const sel = answers[q.id] === val ? 'sel' : '';
+                html += `<button class="opt ${sel}" onclick="pickChoice('${q.id}','${val}')">
+                            <span class="dot"></span><span>${opt}</span></button>`;
+            });
+            html += '</div>';
+        } else {
+            const v = answers[q.id] ? answers[q.id].replace(/"/g, '&quot;') : '';
+            html += `<input class="short-input" id="shortInput" placeholder="답을 입력하세요"
+                        value="${v}" oninput="answers['${q.id}'] = this.value">`;
+        }
+        html += '</div>';
+        container.innerHTML = html;
+
+        document.getElementById('prevBtn').disabled = curIdx === 0;
+        const nextBtn = document.getElementById('nextBtn');
+        nextBtn.disabled = false;
+        if (curIdx === questions.length - 1) {
+            nextBtn.innerText = '제출하기';
+            nextBtn.classList.add('btn-success');
+        } else {
+            nextBtn.innerText = '다음';
+            nextBtn.classList.remove('btn-success');
+        }
+    }
+
+    function pickChoice(qid, val) {
+        answers[qid] = val;
+        renderQuestion();
+    }
+
+    function go(dir) {
+        if (dir === 1 && curIdx === questions.length - 1) {
+            submitQuiz();
+            return;
+        }
+        curIdx += dir;
+        renderQuestion();
+    }
+
+    async function submitQuiz() {
+        const unanswered = questions.filter(q => !answers[q.id] || answers[q.id].toString().trim() === '').length;
+        if (unanswered > 0 && !confirm(`아직 ${unanswered}문제에 답하지 않았습니다. 제출할까요?`)) return;
+
+        const nextBtn = document.getElementById('nextBtn');
+        nextBtn.disabled = true; nextBtn.innerText = '채점 중…';
+
+        const resp = await fetch('/api/quiz/submit', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ attempt_id: attemptId, client_id: clientId, nickname, answers })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            alert(data.message || data.error || '제출 실패');
+            nextBtn.disabled = false; nextBtn.innerText = '제출하기';
+            return;
+        }
+        renderResult(data);
+    }
+
+    function optLabel(r, value) {
+        if (r.q_type !== 'choice' || !value) return value || '-';
+        return value.toString().split(',').map(v => {
+            const i = parseInt(v.trim()) - 1;
+            return (r.options && r.options[i]) ? `${v.trim()}. ${r.options[i]}` : v.trim();
+        }).join(', ');
+    }
+
+    function renderResult(data) {
+        document.getElementById('solveArea').classList.add('hidden');
+        const area = document.getElementById('resultArea');
+        area.classList.remove('hidden');
+
+        let banner = '';
+        if (data.point_awarded) {
+            banner = `<div class="point-banner">🎉 만점! +1 포인트 획득 (누적 ${data.total_points}P)</div>`;
+        } else if (data.is_perfect) {
+            banner = `<div class="point-banner">만점입니다! (이미 포인트가 지급된 세트예요)</div>`;
+        }
+
+        let review = '';
+        data.results.forEach((r, idx) => {
+            const cls = r.is_correct ? 'correct' : 'wrong';
+            const tag = r.is_correct ? '<span class="tag-correct">정답</span>' : '<span class="tag-wrong">오답</span>';
+            review += `<div class="review-item ${cls}">
+                <div class="review-q">${idx + 1}. ${renderMd(r.question)}</div>
+                <div class="review-line">내 답안: <strong>${optLabel(r, r.your_answer)}</strong> ${tag}</div>
+                ${!r.is_correct ? `<div class="review-line">정답: <strong>${optLabel(r, r.correct_answer)}</strong></div>` : ''}
+                ${r.explanation ? `<div class="review-exp">💡 ${r.explanation}</div>` : ''}
+            </div>`;
+        });
+
+        const pdfUrl = `/quiz/attempt/${data.attempt_id}/pdf?client_id=${encodeURIComponent(clientId)}`;
+        const retryBtn = data.wrong_count > 0
+            ? `<button class="btn btn-primary" onclick="startAttempt(${data.attempt_id})">틀린 문제 다시 풀기 (${data.wrong_count})</button>` : '';
+
+        area.innerHTML = `
+            <div class="q-card result-hero">
+                <div class="result-score">${data.score}점</div>
+                <div class="result-msg">${data.total}문제 중 ${data.correct_count}문제 정답</div>
+                ${banner}
+                <div class="result-actions">
+                    <a class="btn btn-success" href="${pdfUrl}">📄 결과 PDF 다운로드</a>
+                    ${retryBtn}
+                    <button class="btn btn-secondary" onclick="startAttempt(null)">새 문제로 다시 풀기</button>
+                    <a class="btn btn-secondary" href="{{ url_for('main.quiz_grades', subject=subject) }}">과목 화면으로</a>
+                </div>
+            </div>
+            <h3 style="margin: 10px 0 14px;">문항별 리뷰</h3>
+            ${review}
+        `;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // 시작
+    startAttempt(null);
+</script>
+{% endblock %}

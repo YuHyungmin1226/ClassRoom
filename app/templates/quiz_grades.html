@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+    .quiz-wrap { max-width: 800px; margin: 30px auto; padding: 20px; }
+    .quiz-head { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+    .quiz-head .emoji { font-size: 2.6rem; }
+    .quiz-head h1 { font-size: 2rem; font-weight: 800; color: #1e293b; margin: 0; }
+    .quiz-sub { color: #64748b; margin: 0 0 24px 0; }
+    .nick-box {
+        background: white; border: 1px solid #e2e8f0; border-radius: 16px; padding: 18px 20px;
+        margin-bottom: 24px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    .nick-box label { font-weight: 700; color: #475569; }
+    .nick-box input {
+        flex: 1; min-width: 180px; padding: 10px 14px; border: 2px solid #e2e8f0;
+        border-radius: 10px; font-size: 1rem;
+    }
+    .grade-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 18px; }
+    .grade-card {
+        background: white; border-radius: 18px; padding: 26px; text-align: center;
+        border: 2px solid #e2e8f0; transition: all 0.2s ease;
+    }
+    .grade-card h3 { font-size: 1.6rem; font-weight: 800; color: #6366f1; margin: 0 0 6px 0; }
+    .grade-card .cnt { color: #64748b; font-size: 0.9rem; margin-bottom: 16px; }
+    .grade-card.disabled { opacity: 0.55; }
+    .grade-card .btn { width: 100%; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="quiz-wrap">
+    <div class="quiz-head">
+        <span class="emoji">{{ icon }}</span>
+        <h1>{{ subject_name }}</h1>
+    </div>
+    <p class="quiz-sub">학년을 선택하세요. 선택한 풀에서 무작위로 최대 {{ per_set }}문제가 출제됩니다.</p>
+
+    <div class="nick-box">
+        <label for="nickname">이름</label>
+        <input type="text" id="nickname" placeholder="이름을 입력하세요 (결과지/포인트에 사용)">
+    </div>
+
+    <div class="grade-grid">
+        {% for g, gname in grades.items() %}
+        {% set cnt = counts.get(g, 0) %}
+        <div class="grade-card {{ 'disabled' if cnt == 0 else '' }}">
+            <h3>{{ gname }}</h3>
+            <div class="cnt">{{ cnt }}문제 보유</div>
+            {% if cnt == 0 %}
+                <button class="btn btn-secondary" disabled>준비중</button>
+            {% else %}
+                <button class="btn btn-primary" onclick="startQuiz({{ g }})">풀기 시작</button>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    <div style="margin-top: 28px;">
+        <a href="{{ url_for('main.quiz_subjects') }}" class="btn btn-secondary btn-sm">← 과목 선택</a>
+    </div>
+</div>
+
+<script>
+    const subject = "{{ subject }}";
+    // 닉네임 기억
+    const savedNick = localStorage.getItem('classroom_nickname');
+    if (savedNick) document.getElementById('nickname').value = savedNick;
+
+    function startQuiz(grade) {
+        const nick = document.getElementById('nickname').value.trim();
+        if (!nick) {
+            alert('이름을 먼저 입력해주세요.');
+            document.getElementById('nickname').focus();
+            return;
+        }
+        localStorage.setItem('classroom_nickname', nick);
+        location.href = `/quiz/${subject}/${grade}`;
+    }
+</script>
+{% endblock %}

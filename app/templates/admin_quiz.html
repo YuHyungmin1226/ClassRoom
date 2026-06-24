@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+    .aq-wrap { max-width: 1000px; margin: 30px auto; padding: 20px; }
+    .aq-head { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom: 8px; }
+    .aq-head h1 { margin:0; font-size: 2rem; font-weight: 800; color:#1e293b; }
+    .aq-sub { color:#64748b; margin: 0 0 24px 0; }
+    .pool-table { width:100%; border-collapse: collapse; background:white; border-radius:14px; overflow:hidden; box-shadow:0 8px 20px -12px rgba(0,0,0,.12); }
+    .pool-table th, .pool-table td { padding: 14px 16px; text-align:center; border-bottom:1px solid #f1f5f9; }
+    .pool-table th { background:#f8fafc; color:#475569; font-size:.85rem; text-transform:uppercase; }
+    .pool-table td.subj { text-align:left; font-weight:700; color:#1e293b; }
+    .cell-count { font-weight:800; font-size:1.1rem; }
+    .cell-count.ok { color:#10b981; }
+    .cell-count.low { color:#f59e0b; }
+    .cell-count.none { color:#ef4444; }
+    .cell-actions { display:flex; gap:6px; justify-content:center; margin-top:6px; }
+    .cell-actions a, .cell-actions button { font-size:.72rem; padding:3px 8px; }
+    .note { margin-top:18px; font-size:.85rem; color:#64748b; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:10px; padding:12px 14px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="aq-wrap">
+    <div class="aq-head">
+        <h1>🗂️ ClassQuiz 문제 풀 관리</h1>
+        <a href="{{ url_for('main.admin_classroom') }}" class="btn btn-secondary btn-sm">← Back</a>
+    </div>
+    <p class="aq-sub">과목·학년별 문제 수입니다. 한 세트는 {{ per_set }}문제이며, {{ per_set }}문제 이상 있어야 정상 출제됩니다. 엑셀로 일괄 업로드/다운로드할 수 있습니다.</p>
+
+    <table class="pool-table">
+        <thead>
+            <tr>
+                <th style="text-align:left;">과목</th>
+                {% for g, gname in grades.items() %}<th>{{ gname }}</th>{% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for code, name in subjects.items() %}
+            <tr>
+                <td class="subj">{{ icons.get(code,'📘') }} {{ name }}</td>
+                {% for g, gname in grades.items() %}
+                {% set cnt = counts[code][g] %}
+                <td>
+                    <div class="cell-count {{ 'none' if cnt == 0 else ('low' if cnt < per_set else 'ok') }}">{{ cnt }}</div>
+                    <div class="cell-actions">
+                        <a class="btn btn-secondary" href="{{ url_for('main.admin_quiz_export', subject=code, grade=g) }}">↓</a>
+                        <button class="btn btn-secondary" onclick="triggerImport('{{ code }}', {{ g }})">↑</button>
+                    </div>
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="note">
+        <strong>엑셀 형식</strong> (첫 행은 헤더): <code>unit | standard_code | difficulty | q_type | question | options(|) | correct_answer | explanation</code><br>
+        업로드 시 해당 과목·학년의 기존 문제를 모두 교체합니다. <code>q_type</code>은 <code>choice</code>(보기 번호 정답) 또는 <code>short</code>(단답).
+    </div>
+
+    <input type="file" id="importFile" accept=".xlsx" style="display:none;">
+</div>
+
+<script>
+    let importTarget = null;
+    function triggerImport(subject, grade) {
+        importTarget = { subject, grade };
+        document.getElementById('importFile').click();
+    }
+    document.getElementById('importFile').addEventListener('change', async function() {
+        if (!this.files || !this.files[0] || !importTarget) return;
+        if (!confirm(`${importTarget.subject} ${importTarget.grade}학년의 기존 문제를 모두 교체합니다. 계속할까요?`)) {
+            this.value = ''; return;
+        }
+        const fd = new FormData();
+        fd.append('file', this.files[0]);
+        fd.append('replace', '1');
+        const res = await fetch(`/admin/quiz/${importTarget.subject}/${importTarget.grade}/import`, { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.success) { alert(`${data.added}문제 등록 완료!`); location.reload(); }
+        else { alert('오류: ' + (data.error || '실패')); }
+        this.value = '';
+    });
+</script>
+{% endblock %}
