@@ -1,3 +1,8 @@
+# eventlet 사용 시 반드시 다른 모든 import보다 먼저 monkey_patch 해야
+# 허브가 시그널(Ctrl+C)에 즉시 반응해 서버가 바로 종료된다.
+import eventlet
+eventlet.monkey_patch()
+
 import sys
 import os
 import signal
