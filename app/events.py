@@ -86,7 +86,7 @@ def on_edit_flag(data):
     session_id = data.get('session_id')
     flag_id = data.get('flag_id')
 
-    flag = Flag.query.get(flag_id)
+    flag = db.session.get(Flag, flag_id)
     if flag:
         # Authorization check: Admin or the person who created the flag
         is_admin = session.get('admin_logged_in', False)
@@ -138,9 +138,9 @@ def on_delete_flag(data):
     flag_id = data.get('flag_id')
 
     try:
-        flag = Flag.query.get(int(flag_id))
+        flag = db.session.get(Flag, int(flag_id))
     except (TypeError, ValueError):
-        flag = Flag.query.get(flag_id)
+        flag = db.session.get(Flag, flag_id)
 
     if flag:
         # Permission check:

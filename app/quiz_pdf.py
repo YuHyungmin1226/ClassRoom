@@ -1,6 +1,8 @@
 """ClassQuiz 결과 PDF 생성 (reportlab)."""
 import io
 import os
+import re
+import json
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -188,7 +190,6 @@ def build_result_pdf(attempt, question_map, answer_map, total_points=None):
 
 
 def _ordered_qids(attempt):
-    import json
     try:
         return json.loads(attempt.question_ids)
     except (TypeError, ValueError):
@@ -197,7 +198,6 @@ def _ordered_qids(attempt):
 
 def _strip_md(text):
     """PDF 표시는 평문 위주이므로 간단히 이미지 마크다운만 치환."""
-    import re
     if not text:
         return ''
     text = re.sub(r'!\[[^\]]*\]\([^)]*\)', '[이미지]', text)

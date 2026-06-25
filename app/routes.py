@@ -8,6 +8,7 @@ import io
 import json
 import time
 import random
+import shutil
 import zipfile
 from datetime import datetime
 from . import db
@@ -196,7 +197,6 @@ def change_password():
 @admin_required
 def reset_data():
 
-    import shutil
     # 협업(ClassMap/Write/Draw) 데이터
     db.session.query(Flag).delete()
     db.session.query(Session).delete()
@@ -359,7 +359,7 @@ def upload_file():
 def _get_points(client_id):
     if not client_id:
         return 0
-    sp = StudentPoint.query.get(client_id)
+    sp = db.session.get(StudentPoint, client_id)
     return sp.points if sp else 0
 
 
@@ -484,7 +484,7 @@ def quiz_submit():
     answers = data.get('answers') or {}  # {question_id: response}
     nickname = (data.get('nickname') or '').strip()
 
-    attempt = QuizAttempt.query.get(attempt_id)
+    attempt = db.session.get(QuizAttempt, attempt_id)
     if not attempt:
         return jsonify({'error': 'attempt not found'}), 404
     if attempt.client_id != client_id:
@@ -537,7 +537,7 @@ def quiz_submit():
     # 포인트 지급: 정식 세트(오답 재풀이 아님)에서 만점일 때 1회
     point_awarded_now = False
     if is_perfect and not attempt.is_retry and not attempt.point_awarded:
-        sp = StudentPoint.query.get(client_id)
+        sp = db.session.get(StudentPoint, client_id)
         if not sp:
             sp = StudentPoint(client_id=client_id, nickname=attempt.nickname, points=0)
             db.session.add(sp)
@@ -567,7 +567,7 @@ def quiz_retry_wrong():
     attempt_id = data.get('attempt_id')
     client_id = (data.get('client_id') or '').strip()
 
-    src = QuizAttempt.query.get(attempt_id)
+    src = db.session.get(QuizAttempt, attempt_id)
     if not src:
         return jsonify({'error': 'attempt not found'}), 404
     if src.client_id != client_id:
@@ -714,7 +714,10 @@ def admin_quiz_import(subject, grade):
 # ==========================================================================
 
 PROTECTED_GAMES_DIR = os.path.join(os.path.dirname(__file__), 'protected_games')
-GAME_PASS_TTL = 6 * 3600  # 결제 후 플레이 가능 시간(초)
+# 결제 후 게임 정적 파일을 열 수 있는 세션 권한의 유효 시간(초).
+# 한 차시(수업 시간) 정도로 두어, 진행 중인 한 판의 리소스 로딩을 보장한다.
+# 게임 선택 화면(/game/<id>)에 다시 들어가 '플레이하기'를 누르면 포인트가 다시 차감된다.
+GAME_PASS_TTL = 3 * 3600
 
 
 def _is_admin():
@@ -783,7 +786,7 @@ def game_play_spend():
     if not client_id:
         return jsonify({'error': 'client_id required'}), 400
 
-    sp = StudentPoint.query.get(client_id)
+    sp = db.session.get(StudentPoint, client_id)
     points = sp.points if sp else 0
     if points < cost:
         return jsonify({
