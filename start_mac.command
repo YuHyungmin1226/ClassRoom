@@ -38,9 +38,19 @@ fi
 VENV_PYTHON="./$VENV_DIR/bin/python3"
 VENV_PIP="./$VENV_DIR/bin/pip"
 
-# Install requirements quietly
-echo "🔄 Checking and installing dependencies..."
-$VENV_PIP install -r requirements.txt > /dev/null 2>&1
+# Install requirements only when requirements.txt changes
+echo "🔄 Checking dependencies..."
+MARKER="$VENV_DIR/.requirements.sha256"
+CURRENT_HASH=$($VENV_PYTHON -c "import hashlib; print(hashlib.sha256(open('requirements.txt','rb').read()).hexdigest())")
+SAVED_HASH=""
+[ -f "$MARKER" ] && SAVED_HASH=$(cat "$MARKER")
+if [ "$CURRENT_HASH" != "$SAVED_HASH" ]; then
+    echo "📦 Installing/updating dependencies..."
+    $VENV_PIP install -r requirements.txt > /dev/null 2>&1
+    echo "$CURRENT_HASH" > "$MARKER"
+else
+    echo "✅ Dependencies are up to date."
+fi
 
 # Attempt to stop any existing ghost process running on port 5555
 echo "🧹 Cleaning up port 5555..."

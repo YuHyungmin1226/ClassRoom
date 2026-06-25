@@ -34,9 +34,17 @@ if not exist "%PYTHON_EXE%" (
     del "%PYTHON_DIR%\get-pip.py"
 )
 
-:: 2. Install/Update Dependencies
+:: 2. Install/Update Dependencies (only when requirements.txt changes)
 echo [*] Checking dependencies...
-"%PYTHON_EXE%" -m pip install -r requirements.txt --quiet --no-warn-script-location
+set MARKER=%PYTHON_DIR%\.requirements.sha256
+"%PYTHON_EXE%" -c "import hashlib,os,sys; h=hashlib.sha256(open('requirements.txt','rb').read()).hexdigest(); m=open(r'%MARKER%').read().strip() if os.path.exists(r'%MARKER%') else ''; sys.exit(0 if h==m else 1)"
+if errorlevel 1 (
+    echo [*] Installing/updating packages...
+    "%PYTHON_EXE%" -m pip install -r requirements.txt --quiet --no-warn-script-location
+    "%PYTHON_EXE%" -c "import hashlib; open(r'%MARKER%','w').write(hashlib.sha256(open('requirements.txt','rb').read()).hexdigest())"
+) else (
+    echo [*] Dependencies are up to date, skipping install.
+)
 
 :: 3. Cleanup Port 5555
 echo [*] Cleaning up port 5555...
