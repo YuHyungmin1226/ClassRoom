@@ -8,8 +8,10 @@ import json
 
 from . import db
 from .models import SubjectQuestion
-from .quiz_generators import generate as _gen_param, AUTO_TAG
-from .quiz_knowledge import generate_knowledge as _gen_knowledge
+# 무거운 생성기 모듈(quiz_generators, quiz_knowledge)은 실제 생성이 필요할 때만
+# 함수 내부에서 지연 import 한다. 그래야 채워진 DB로 서버를 재기동할 때
+# (seed_if_empty의 개수 확인만으로 끝나는 경우) 불필요한 로딩을 피한다.
+AUTO_TAG = 'AUTO'
 
 SEED_DIR = os.path.join(os.path.dirname(__file__), 'seed_data')
 
@@ -60,8 +62,10 @@ def seed_curated(subject=None, grade=None):
 
 def _generate(subject, grade, n):
     if subject in KNOWLEDGE_SUBJECTS:
-        return _gen_knowledge(subject, grade, n)
-    return _gen_param(subject, grade, n)
+        from .quiz_knowledge import generate_knowledge
+        return generate_knowledge(subject, grade, n)
+    from .quiz_generators import generate as gen_param
+    return gen_param(subject, grade, n)
 
 
 def seed_generated(subject=None, grade=None, n_override=None):
