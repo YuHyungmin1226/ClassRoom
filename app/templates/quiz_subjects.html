@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+    .quiz-wrap { max-width: 1000px; margin: 30px auto; padding: 20px; }
+    .quiz-top {
+        display: flex; justify-content: space-between; align-items: center;
+        flex-wrap: wrap; gap: 15px; margin-bottom: 10px;
+    }
+    .quiz-top h1 {
+        font-size: 2.4rem; font-weight: 800; margin: 0;
+        background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+        -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .point-pill {
+        background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa;
+        padding: 10px 18px; border-radius: 999px; font-weight: 700; font-size: 1rem;
+    }
+    .quiz-sub { color: #64748b; margin: 0 0 30px 0; }
+    .subject-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;
+    }
+    .subject-card {
+        background: white; border-radius: 20px; padding: 30px 24px; cursor: pointer;
+        text-align: center; border: 2px solid transparent;
+        box-shadow: 0 10px 25px -8px rgba(0,0,0,0.1); transition: all 0.25s ease;
+    }
+    .subject-card:hover { transform: translateY(-8px); border-color: #6366f1; box-shadow: 0 20px 35px -12px rgba(99,102,241,0.25); }
+    .subject-emoji { font-size: 3rem; margin-bottom: 12px; }
+    .subject-card h3 { font-size: 1.4rem; font-weight: 700; color: #1e293b; margin: 0 0 8px 0; }
+    .subject-card .count { font-size: 0.85rem; color: #64748b; }
+    .count.empty { color: #ef4444; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="quiz-wrap">
+    <div class="quiz-top">
+        <h1>📝 ClassQuiz</h1>
+        <span class="point-pill">⭐ 내 포인트 <span id="myPoints">…</span> P</span>
+    </div>
+    <p class="quiz-sub">과목을 선택해 {{ '' }}문제를 풀어보세요. 한 세트에 {{ 30 }}문제, 만점이면 1포인트를 얻습니다.</p>
+
+    <div class="subject-grid">
+        {% for code, name in subjects.items() %}
+        <a class="subject-card" href="{{ url_for('main.quiz_grades', subject=code) }}" style="text-decoration:none;">
+            <div class="subject-emoji">{{ icons.get(code, '📘') }}</div>
+            <h3>{{ name }}</h3>
+            {% set total = subject_totals.get(code, 0) %}
+            <div class="count {{ 'empty' if total == 0 else '' }}">
+                {{ total }}문제 {{ '(준비중)' if total == 0 else '' }}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+
+    <div style="margin-top: 30px;">
+        <a href="/" class="btn btn-secondary btn-sm">← 홈으로</a>
+    </div>
+</div>
+
+<script>
+    let clientId = localStorage.getItem('classroom_client_id');
+    if (!clientId) {
+        clientId = 'client_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('classroom_client_id', clientId);
+    }
+    fetch('/api/quiz/points?client_id=' + encodeURIComponent(clientId))
+        .then(r => r.json())
+        .then(d => { document.getElementById('myPoints').innerText = d.points; })
+        .catch(() => { document.getElementById('myPoints').innerText = '0'; });
+</script>
+{% endblock %}

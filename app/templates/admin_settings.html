@@ -36,6 +36,18 @@
     </div>
 
     <div style="margin-top: 40px; border-top: 1px solid #e2e8f0; padding-top: 25px;">
+        <h3 style="margin-top: 0; font-size: 1.2em; margin-bottom: 15px; color: #334155;">Grant Points to All Students</h3>
+        <p style="color: #64748b; font-size: 0.9em; margin-bottom: 20px;">
+            모든 학생(기기)에게 한 번에 포인트를 지급하거나 차감합니다. 음수를 입력하면 포인트가 차감됩니다.
+        </p>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom: 10px;">
+            <input type="number" id="grantAmount" value="1" style="width:120px; padding:10px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:1rem;">
+            <button class="btn btn-primary" onclick="grantPoints()">전체 지급</button>
+        </div>
+        <span id="grantMsg" style="font-weight:600; color:#16a34a; font-size: 0.95em; display: block; min-height: 1.2em;"></span>
+    </div>
+
+    <div style="margin-top: 40px; border-top: 1px solid #e2e8f0; padding-top: 25px;">
         <h3 style="margin-top: 0; font-size: 1.2em; margin-bottom: 15px; color: #dc2626;">Danger Zone</h3>
         <p style="color: #64748b; font-size: 0.9em; margin-bottom: 20px;">
             This action will permanently delete all Classes, Sessions, Notes (Flags), and uploaded files. This cannot be undone.
@@ -45,4 +57,22 @@
         </form>
     </div>
 </div>
+
+<script>
+    async function grantPoints() {
+        const amount = parseInt(document.getElementById('grantAmount').value, 10);
+        const msg = document.getElementById('grantMsg');
+        if (!amount) { msg.style.color = '#ef4444'; msg.innerText = '0이 아닌 정수를 입력하세요.'; return; }
+        if (!confirm(`모든 학생에게 ${amount} 포인트를 지급할까요?`)) return;
+        try {
+            const res = await fetch('/admin/grant_points', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ amount })
+            });
+            const d = await res.json();
+            if (d.ok) { msg.style.color = '#16a34a'; msg.innerText = `완료: ${d.students}명에게 ${d.amount}P 지급됨`; }
+            else { msg.style.color = '#ef4444'; msg.innerText = '오류: ' + (d.error || '실패'); }
+        } catch (e) { msg.style.color = '#ef4444'; msg.innerText = '네트워크 오류: ' + e; }
+    }
+</script>
 {% endblock %}

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+    .game-wrap { max-width: 1000px; margin: 30px auto; padding: 20px; }
+    .game-top { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px; margin-bottom:10px; }
+    .game-top h1 {
+        font-size: 2.4rem; font-weight: 800; margin: 0;
+        background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+        -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .point-pill {
+        background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa;
+        padding: 10px 18px; border-radius: 999px; font-weight: 700; font-size: 1rem;
+    }
+    .game-sub { color:#64748b; margin: 0 0 30px 0; }
+    .game-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 22px; }
+    .game-card {
+        background: white; border-radius: 20px; padding: 28px 24px; cursor:pointer;
+        border: 2px solid transparent; box-shadow: 0 10px 25px -8px rgba(0,0,0,0.12);
+        transition: all .25s ease; text-decoration:none; display:block; color:inherit;
+    }
+    .game-card:hover { transform: translateY(-8px); border-color:#f59e0b; box-shadow: 0 20px 35px -12px rgba(245,158,11,0.28); }
+    .game-emoji { font-size: 3rem; margin-bottom: 12px; }
+    .game-card h3 { font-size: 1.5rem; font-weight: 800; color:#1e293b; margin: 0 0 8px 0; }
+    .game-card p { color:#64748b; font-size:.92rem; line-height:1.5; margin:0 0 14px 0; min-height:42px; }
+    .cost-badge { display:inline-block; background:#fef3c7; color:#92400e; font-weight:700; font-size:.85rem; padding:5px 12px; border-radius:8px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="game-wrap">
+    <div class="game-top">
+        <h1>🎮 ClassGame</h1>
+        <span class="point-pill">⭐ 내 포인트 <span id="myPoints">…</span> P</span>
+    </div>
+    <p class="game-sub">ClassQuiz에서 모은 포인트로 게임을 즐겨보세요. 한 판 플레이할 때마다 포인트가 사용됩니다.</p>
+
+    <div class="game-grid">
+        {% for gid, g in games.items() %}
+        <a class="game-card" href="{{ url_for('main.game_play', game_id=gid) }}">
+            <div class="game-emoji">{{ g.icon }}</div>
+            <h3>{{ g.name }}</h3>
+            <p>{{ g.desc }}</p>
+            <span class="cost-badge">플레이 {{ g.cost }} P</span>
+        </a>
+        {% endfor %}
+    </div>
+
+
+
+    <div style="margin-top: 30px; display:flex; gap:10px;">
+        <a href="/" class="btn btn-secondary btn-sm">← 홈으로</a>
+        <a href="{{ url_for('main.quiz_subjects') }}" class="btn btn-secondary btn-sm">포인트 모으러 가기 (ClassQuiz)</a>
+    </div>
+</div>
+
+<script>
+    let clientId = localStorage.getItem('classroom_client_id');
+    if (!clientId) {
+        clientId = 'client_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('classroom_client_id', clientId);
+    }
+    fetch('/api/quiz/points?client_id=' + encodeURIComponent(clientId))
+        .then(r => r.json())
+        .then(d => { document.getElementById('myPoints').innerText = d.points; })
+        .catch(() => { document.getElementById('myPoints').innerText = '0'; });
+
+
+</script>
+{% endblock %}

@@ -6,7 +6,7 @@ from .config import Config
 db = SQLAlchemy()
 socketio = SocketIO(cors_allowed_origins=Config.ALLOWED_ORIGINS or "*")
 
-def create_app():
+def create_app(auto_seed=False):
     app = Flask(__name__)
     app.config.from_object(Config)
 
@@ -29,6 +29,12 @@ def create_app():
             default_admin.set_password('admin123')
             db.session.add(default_admin)
             db.session.commit()
+
+        # 최초 실행(서버 기동) 시 문제 풀이 비어 있으면 자동으로 시드한다.
+        # 테스트·CLI 스크립트는 auto_seed=False(기본)라 불필요한 대량 생성을 피한다.
+        if auto_seed:
+            from .seeding import seed_if_empty
+            seed_if_empty()
 
         from .routes import main
         app.register_blueprint(main)

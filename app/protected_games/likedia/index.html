@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>diaLike - Diablo Style Web RPG</title>
+    <!-- Google Fonts: Gothic & clean typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Cinzel:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="game-container">
+        <!-- Main Game Canvas -->
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- Screen Overlay for Gothic Vignette (Vibe) -->
+        <div class="vignette"></div>
+
+        <!-- Floating Damage/Text Layer (HTML overlay for smoother text rendering if needed, or we can draw on Canvas) -->
+        <div id="ui-layer">
+            <!-- Level Up Announcement Banner -->
+            <div id="level-up-banner" class="hidden">LEVEL UP!</div>
+
+            <!-- Minimap / Automap (M) -->
+            <canvas id="minimap" width="176" height="176"></canvas>
+
+            <!-- Game Over Summary -->
+            <div id="gameover-panel" class="glass-panel hidden">
+                <h2 class="gameover-title">YOU DIED</h2>
+                <p class="gameover-sub">어둠이 당신을 삼켰습니다.</p>
+                <div class="gameover-stats">
+                    <div class="go-row"><span>클래스</span><span id="go-class">-</span></div>
+                    <div class="go-row"><span>도달 깊이</span><span id="go-floor">-</span></div>
+                    <div class="go-row"><span>레벨</span><span id="go-level">-</span></div>
+                    <div class="go-row"><span>처치 수</span><span id="go-kills">-</span></div>
+                    <div class="go-row"><span>획득 골드</span><span id="go-gold">-</span></div>
+                    <div class="go-row"><span>최고 피해</span><span id="go-maxhit">-</span></div>
+                    <div class="go-row"><span>생존 시간</span><span id="go-time">-</span></div>
+                </div>
+                <button id="gameover-restart-btn" class="gothic-btn">새로운 영웅으로 다시 시작</button>
+            </div>
+
+            <!-- Start / Help Guide -->
+            <div id="guide-panel" class="glass-panel">
+                <h2>DIALIKE</h2>
+                <p>다크 판타지 월드에 오신 것을 환영합니다.</p>
+                <ul>
+                    <li><span class="key">W A S D</span><span>이동</span></li>
+                    <li><span class="key">&lt; / &gt;</span><span>기본 공격 (가까운 적) / 보조 스킬</span></li>
+                    <li><span class="key">1 ~ 4</span><span>보조 스킬 전환 (화염구/냉기/번개/회전베기)</span></li>
+                    <li><span class="key">I / C / K</span><span>인벤토리 / 캐릭터 정보 / 스킬</span></li>
+                    <li><span class="key">M</span><span>미니맵 표시 · 숨기기</span></li>
+                    <li><span class="key">Q / R / T</span><span>체력 물약 / 마나 물약 / 차원문</span></li>
+                    <li><span class="key">F</span><span>제단 등 상호작용</span></li>
+                    <li><span class="key">마우스 휠</span><span>카메라 확대 · 축소</span></li>
+                    <li><span class="key">마우스</span><span>클릭 이동 · 공격, NPC 대화</span></li>
+                </ul>
+                <button id="start-game-btn" class="gothic-btn">게임 시작</button>
+            </div>
+
+            <!-- Character Info / Stats Panel -->
+            <div id="stats-panel" class="glass-panel hidden">
+                <div class="panel-header">
+                    <h3>영웅 정보</h3>
+                    <button class="close-btn" id="close-stats-btn">&times;</button>
+                </div>
+                <div class="panel-body">
+                    <div class="stat-group">
+                        <span class="stat-label">클래스:</span>
+                        <span id="stat-class" class="stat-value">전사</span>
+                    </div>
+                    <div class="stat-group">
+                        <span class="stat-label">레벨:</span>
+                        <span id="stat-level" class="stat-value">1</span>
+                    </div>
+                    <div class="stat-group">
+                        <span class="stat-label">현재 위치:</span>
+                        <span id="stat-floor" class="stat-value">지하 1층</span>
+                    </div>
+                    <div class="stat-group">
+                        <span class="stat-label">공격력:</span>
+                        <span id="stat-atk" class="stat-value">15</span>
+                        <button class="stat-up-btn" id="up-atk" disabled>+</button>
+                    </div>
+                    <div class="stat-group">
+                        <span class="stat-label">최대 체력:</span>
+                        <span id="stat-maxhp" class="stat-value">100</span>
+                        <button class="stat-up-btn" id="up-maxhp" disabled>+</button>
+                    </div>
+                    <div class="stat-group">
+                        <span class="stat-label">최대 마나:</span>
+                        <span id="stat-maxmp" class="stat-value">50</span>
+                        <button class="stat-up-btn" id="up-maxmp" disabled>+</button>
+                    </div>
+                    <div class="stat-group">
+                        <span class="stat-label">보유 골드:</span>
+                        <span id="stat-gold" class="stat-value text-gold">100 G</span>
+                    </div>
+                    <div class="stat-group">
+                        <span class="stat-label">남은 스탯 포인트:</span>
+                        <span id="stat-points" class="stat-value text-gold">0</span>
+                    </div>
+                    <hr class="gothic-divider">
+                    <div class="stat-group">
+                        <span class="stat-label">경험치:</span>
+                        <span id="stat-exp" class="stat-value">0 / 100</span>
+                    </div>
+                    <div class="stat-group">
+                        <span class="stat-label">처치한 몬스터:</span>
+                        <span id="stat-kills" class="stat-value">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Inventory Panel -->
+            <div id="inventory-panel" class="glass-panel hidden">
+                <div class="panel-header">
+                    <h3>소지품 창</h3>
+                    <button class="close-btn" id="close-inv-btn">&times;</button>
+                </div>
+                <div class="panel-body">
+                    <div class="inventory-grid">
+                        <!-- 16 inventory slots (4x4) -->
+                        <div class="inv-slot" data-slot="0"></div>
+                        <div class="inv-slot" data-slot="1"></div>
+                        <div class="inv-slot" data-slot="2"></div>
+                        <div class="inv-slot" data-slot="3"></div>
+                        <div class="inv-slot" data-slot="4"></div>
+                        <div class="inv-slot" data-slot="5"></div>
+                        <div class="inv-slot" data-slot="6"></div>
+                        <div class="inv-slot" data-slot="7"></div>
+                        <div class="inv-slot" data-slot="8"></div>
+                        <div class="inv-slot" data-slot="9"></div>
+                        <div class="inv-slot" data-slot="10"></div>
+                        <div class="inv-slot" data-slot="11"></div>
+                        <div class="inv-slot" data-slot="12"></div>
+                        <div class="inv-slot" data-slot="13"></div>
+                        <div class="inv-slot" data-slot="14"></div>
+                        <div class="inv-slot" data-slot="15"></div>
+                    </div>
+                    <div class="item-description" id="item-desc">
+                        슬롯 위의 아이템 정보를 보려면 마우스를 올리세요.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Skills Panel -->
+            <div id="skills-panel" class="glass-panel hidden">
+                <div class="panel-header">
+                    <h3>스킬 정보</h3>
+                    <button class="close-btn" id="close-skills-btn">&times;</button>
+                </div>
+                <div class="panel-body">
+                    <div id="skills-list"></div>
+                    <hr class="gothic-divider">
+                    <div class="stat-group">
+                        <span class="stat-label">남은 스킬 포인트:</span>
+                        <span id="skill-points" class="stat-value text-gold">0</span>
+                    </div>
+                    <div class="skill-hint">숫자키 1~4 또는 [선택]으로 우클릭 스킬을 바꿉니다.</div>
+                </div>
+            </div>
+
+            <!-- Shop Panel -->
+            <div id="shop-panel" class="glass-panel hidden">
+                <div class="panel-header">
+                    <h3>상점 (아카라)</h3>
+                    <button class="close-btn" id="close-shop-btn">&times;</button>
+                </div>
+                <div class="panel-body">
+                    <div class="shop-item" data-item="0">
+                        <div class="shop-item-info">
+                            <span class="shop-item-name text-gold">소형 체력 물약</span>
+                            <span class="shop-item-stat">체력 25% 회복</span>
+                        </div>
+                        <button class="gothic-btn buy-btn" data-index="0">구매 (15G)</button>
+                    </div>
+                    <div class="shop-item" data-item="1">
+                        <div class="shop-item-info">
+                            <span class="shop-item-name text-gold">하급 체력 물약</span>
+                            <span class="shop-item-stat">체력 35% 회복</span>
+                        </div>
+                        <button class="gothic-btn buy-btn" data-index="1">구매 (30G)</button>
+                    </div>
+                    <div class="shop-item" data-item="2">
+                        <div class="shop-item-info">
+                            <span class="shop-item-name text-gold">일반 체력 물약</span>
+                            <span class="shop-item-stat">체력 50% 회복</span>
+                        </div>
+                        <button class="gothic-btn buy-btn" data-index="2">구매 (60G)</button>
+                    </div>
+                    <div class="shop-item" data-item="3">
+                        <div class="shop-item-info">
+                            <span class="shop-item-name text-gold">대형 체력 물약</span>
+                            <span class="shop-item-stat">체력 70% 회복</span>
+                        </div>
+                        <button class="gothic-btn buy-btn" data-index="3">구매 (125G)</button>
+                    </div>
+                    <div class="shop-item" data-item="4">
+                        <div class="shop-item-info">
+                            <span class="shop-item-name" style="color: #3a8fff;">하급 마나 물약</span>
+                            <span class="shop-item-stat">마나 40% 회복</span>
+                        </div>
+                        <button class="gothic-btn buy-btn" data-index="4">구매 (25G)</button>
+                    </div>
+                    <div class="shop-item" data-item="5">
+                        <div class="shop-item-info">
+                            <span class="shop-item-name" style="color: #3a8fff;">일반 마나 물약</span>
+                            <span class="shop-item-stat">마나 70% 회복</span>
+                        </div>
+                        <button class="gothic-btn buy-btn" data-index="5">구매 (60G)</button>
+                    </div>
+                    <div class="shop-item" data-item="gamble">
+                        <div class="shop-item-info">
+                            <span class="shop-item-name" style="color: #ff5500;">도박 — 미감정 장비</span>
+                            <span class="shop-item-stat">무작위 매직 등급 이상 장비</span>
+                        </div>
+                        <button class="gothic-btn" id="gamble-btn">도박 (150G)</button>
+                    </div>
+                    <div class="shop-item-hint">소지품 창에서 Shift+클릭으로 아이템을 판매할 수 있습니다.</div>
+                </div>
+            </div>
+
+
+            <!-- Diablo Classic HUD Bar (Bottom) -->
+            <div id="hud-bar">
+                <!-- Health Orb (Left) -->
+                <div class="orb-container health-orb-container">
+                    <div class="orb-glass"></div>
+                    <div class="orb-liquid health-liquid" id="health-liquid"></div>
+                    <div class="orb-value" id="health-value">100/100</div>
+                    <div class="orb-label">체력</div>
+                </div>
+
+                <!-- Center Action Bar -->
+                <div class="action-bar-center">
+                    <!-- XP Bar (Top of action bar) -->
+                    <div class="xp-bar-container">
+                        <div class="xp-bar-fill" id="xp-fill" style="width: 0%;"></div>
+                    </div>
+                    
+                    <!-- Buttons and Slots -->
+                    <div class="action-bar-content">
+                        <!-- Panel toggles -->
+                        <div class="action-btn-group">
+                            <button id="toggle-stats-btn" title="캐릭터 정보 (C)">C</button>
+                            <button id="toggle-inv-btn" title="인벤토리 (I)">I</button>
+                            <button id="toggle-skills-btn" title="스킬 정보 (K)">K</button>
+                        </div>
+
+                        <!-- Skill / Potion slots -->
+                        <div class="slots-container">
+                            <div class="skill-slot active" id="slot-lclick" title="기본 공격 (&lt; 키 또는 좌클릭)">
+                                <span class="slot-key">&lt;</span>
+                                <div class="slot-icon atk-icon"></div>
+                                <span class="slot-name">베기</span>
+                            </div>
+                            <div class="skill-slot" id="slot-rclick" title="파이어볼 (&gt; 키 또는 우클릭)">
+                                <span class="slot-key">&gt;</span>
+                                <div class="slot-icon spell-icon"></div>
+                                <span class="slot-name">파이어볼</span>
+                            </div>
+                            <div class="skill-slot potion-slot" id="slot-potion" title="체력 물약 마시기 (Q)">
+                                <span class="slot-key">Q</span>
+                                <div class="slot-icon potion-icon"></div>
+                                <span class="potion-count" id="potion-count">5</span>
+                                <span class="slot-name">체력물약</span>
+                            </div>
+                            <div class="skill-slot potion-slot" id="slot-mana-potion" title="마나 물약 마시기 (R)">
+                                <span class="slot-key">R</span>
+                                <div class="slot-icon potion-icon mana-potion-icon"></div>
+                                <span class="potion-count" id="mana-potion-count">2</span>
+                                <span class="slot-name">마나물약</span>
+                            </div>
+                            <div class="skill-slot" id="slot-portal" title="차원문 열기 (T)">
+                                <span class="slot-key">T</span>
+                                <div class="slot-icon portal-icon"></div>
+                                <span class="slot-name">차원문</span>
+                            </div>
+                        </div>
+
+                        <!-- Level Indicator -->
+                        <div class="hud-level-container">
+                            <div class="hud-level-label">LV</div>
+                            <div class="hud-level-value" id="hud-level">1</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mana Orb (Right) -->
+                <div class="orb-container mana-orb-container">
+                    <div class="orb-glass"></div>
+                    <div class="orb-liquid mana-liquid" id="mana-liquid"></div>
+                    <div class="orb-value" id="mana-value">50/50</div>
+                    <div class="orb-label">마나</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Scripts (load order = dependency order) -->
+    <script src="js/data.js?v=warrior-only"></script>
+    <script src="js/sound.js?v=warrior-only"></script>
+    <script src="js/WorldViewSystem.js?v=warrior-only"></script>
+    <script src="js/PlayerMovementSystem.js?v=warrior-only"></script>
+    <script src="js/CombatSystem.js?v=warrior-only"></script>
+    <script src="js/MonsterFactory.js?v=warrior-only"></script>
+    <script src="js/game.js?v=warrior-only"></script>
+    <script src="js/GameController.js?v=warrior-only"></script>
+</body>
+</html>
