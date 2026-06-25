@@ -7,6 +7,7 @@ eventlet.monkey_patch()
 
 import sys
 import os
+import signal
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from app import create_app, socketio
 import socket
@@ -54,6 +55,17 @@ if __name__ == '__main__':
             print(f"Network Access: http://{ip}:5555")
 
         print("   (Share the Network Access link with your students)")
+        print("   (Press Ctrl+C to stop the server)")
         print("="*60)
+
+    if not debug:
+        # On Windows the eventlet hub blocks in select() with no timeout, so a
+        # cooperative KeyboardInterrupt is never delivered and Ctrl+C appears to
+        # "do nothing". Restoring the OS default SIGINT handler makes Ctrl+C
+        # terminate the process immediately at the C level. All DB writes are
+        # committed per-event, so there is no buffered state to lose.
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        if hasattr(signal, 'SIGBREAK'):  # Ctrl+Break on Windows
+            signal.signal(signal.SIGBREAK, signal.SIG_DFL)
 
     socketio.run(app, debug=debug, host='0.0.0.0', port=5555, use_reloader=debug)
