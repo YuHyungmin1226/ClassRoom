@@ -38,7 +38,7 @@ def get_all_local_ips():
             
     return list(set(ips))
 
-app = create_app()
+app = create_app(auto_seed=True)
 
 if __name__ == '__main__':
     debug = os.environ.get('FLASK_DEBUG', '').lower() in ('true', '1', 'yes')
