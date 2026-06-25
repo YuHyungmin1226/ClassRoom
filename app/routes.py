@@ -1,5 +1,6 @@
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, flash, send_from_directory, send_file
 from werkzeug.utils import secure_filename
+from functools import wraps
 from PIL import Image
 import os
 import uuid
@@ -22,6 +23,26 @@ from .quiz_logic import grade_answer
 main = Blueprint('main', __name__)
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'webm', 'mov'}
+
+
+def admin_required(f):
+    """페이지 라우트용: 미인증 시 로그인 페이지로 리다이렉트."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get('admin_logged_in'):
+            return redirect(url_for('main.admin_login'))
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def admin_api_required(f):
+    """API 라우트용: 미인증 시 JSON 401 반환."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get('admin_logged_in'):
+            return jsonify({'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return wrapper
 
 @main.route('/uploads/<filename>')
 def uploaded_file(filename):
@@ -59,10 +80,9 @@ def admin_logout():
     return redirect(url_for('main.admin_login'))
 
 @main.route('/admin/dashboard')
+@admin_required
 def admin_dashboard():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('main.admin_login'))
-    
+
     class_type = request.args.get('type', 'classmap')
     active_classes = ClassGroup.query.filter_by(is_active=True, class_type=class_type).all()
     past_classes = ClassGroup.query.filter_by(is_active=False, class_type=class_type).all()
@@ -73,10 +93,9 @@ def admin_dashboard():
 
 
 @main.route('/admin/create_class', methods=['POST'])
+@admin_api_required
 def create_class():
-    if not session.get('admin_logged_in'):
-        return jsonify({'error': 'Unauthorized'}), 401
-    
+
     name = request.form.get('name')
     class_type = request.form.get('class_type', 'classmap')
     
@@ -88,18 +107,16 @@ def create_class():
     return redirect(url_for('main.admin_dashboard', type=class_type))
 
 @main.route('/admin/close_class/<class_id>', methods=['POST'])
+@admin_api_required
 def close_class(class_id):
-    if not session.get('admin_logged_in'):
-        return jsonify({'error': 'Unauthorized'}), 401
     c = ClassGroup.query.get_or_404(class_id)
     c.is_active = False
     db.session.commit()
     return redirect(url_for('main.admin_dashboard', type=c.class_type))
 
 @main.route('/admin/delete_class/<class_id>', methods=['POST'])
+@admin_api_required
 def delete_class(class_id):
-    if not session.get('admin_logged_in'):
-        return jsonify({'error': 'Unauthorized'}), 401
     c = ClassGroup.query.get_or_404(class_id)
     class_type = c.class_type
     
@@ -115,19 +132,17 @@ def delete_class(class_id):
     return redirect(url_for('main.admin_dashboard', type=class_type))
 
 @main.route('/admin/class/<class_id>')
+@admin_required
 def admin_class(class_id):
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('main.admin_login'))
     c = ClassGroup.query.get_or_404(class_id)
     active_sessions = Session.query.filter_by(class_id=class_id, is_active=True).all()
     past_sessions = Session.query.filter_by(class_id=class_id, is_active=False).all()
     return render_template('admin_class.html', class_group=c, active_sessions=active_sessions, past_sessions=past_sessions)
 
 @main.route('/admin/class/<class_id>/create_session', methods=['POST'])
+@admin_api_required
 def create_session(class_id):
-    if not session.get('admin_logged_in'):
-        return jsonify({'error': 'Unauthorized'}), 401
-    
+
     c = ClassGroup.query.get_or_404(class_id)
     name = request.form.get('name')
     if not name:
@@ -138,18 +153,16 @@ def create_session(class_id):
     return redirect(url_for('main.admin_class', class_id=c.id))
 
 @main.route('/admin/close_session/<session_id>', methods=['POST'])
+@admin_api_required
 def close_session(session_id):
-    if not session.get('admin_logged_in'):
-        return jsonify({'error': 'Unauthorized'}), 401
     s = Session.query.get_or_404(session_id)
     s.is_active = False
     db.session.commit()
     return redirect(url_for('main.admin_class', class_id=s.class_id))
 
 @main.route('/admin/delete_session/<session_id>', methods=['POST'])
+@admin_api_required
 def delete_session(session_id):
-    if not session.get('admin_logged_in'):
-        return jsonify({'error': 'Unauthorized'}), 401
     s = Session.query.get_or_404(session_id)
     class_id = s.class_id
     
@@ -163,24 +176,14 @@ def delete_session(session_id):
     flash(f"Session '{s.name}' has been successfully deleted.")
     return redirect(url_for('main.admin_class', class_id=class_id))
 
-@main.route('/admin/class/<class_id>/quiz_results')
-def admin_class_quiz_results(class_id):
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('main.admin_login'))
-    c = ClassGroup.query.get_or_404(class_id)
-    sessions = Session.query.filter_by(class_id=class_id).all()
-    return render_template('class_quiz_results.html', class_group=c, sessions=sessions)
-
 @main.route('/admin/settings')
+@admin_required
 def admin_settings():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('main.admin_login'))
     return render_template('admin_settings.html')
 
 @main.route('/admin/change_password', methods=['POST'])
+@admin_required
 def change_password():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('main.admin_login'))
     new_password = request.form.get('new_password')
     if new_password:
         admin = Admin.query.first()
@@ -190,10 +193,9 @@ def change_password():
     return redirect(url_for('main.admin_settings'))
 
 @main.route('/admin/reset_data', methods=['POST'])
+@admin_required
 def reset_data():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('main.admin_login'))
-    
+
     import shutil
     # 협업(ClassMap/Write/Draw) 데이터
     db.session.query(Flag).delete()
@@ -221,10 +223,9 @@ def reset_data():
     return redirect(url_for('main.admin_settings'))
 
 @main.route('/admin/export_markdown')
+@admin_required
 def export_markdown():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('main.admin_login'))
-    
+
     # Create a ZIP file in memory
     memory_file = io.BytesIO()
     with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -283,10 +284,8 @@ def index():
     return render_template('classroom_select.html', is_admin=session.get('admin_logged_in', False))
 
 @main.route('/admin/classroom')
+@admin_required
 def admin_classroom():
-    # Still keep this for explicit admin access
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('main.admin_login'))
     return render_template('classroom_select.html', is_admin=True)
 
 # --- Participant Routes ---
@@ -314,88 +313,7 @@ def view_session(session_id):
         return "This session is closed.", 403
         
     is_admin = session.get('admin_logged_in', False)
-    if s.class_group.class_type == 'classquiz':
-        return render_template('quiz_session.html', quiz_session=s, is_admin=is_admin)
     return render_template('map_session.html', map_session=s, is_admin=is_admin)
-
-@main.route('/admin/session/<session_id>/export_quiz')
-def export_quiz_excel(session_id):
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('main.admin_login'))
-    
-    from openpyxl import Workbook
-    from .models import QuizQuestion
-    
-    s = Session.query.get_or_404(session_id)
-    questions = QuizQuestion.query.filter_by(session_id=session_id).order_by(QuizQuestion.index).all()
-    
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Quiz Questions"
-    
-    # Headers
-    headers = ['Idx', 'Type', 'Question', 'Options (split by |)', 'Correct Answer']
-    ws.append(headers)
-    
-    # Data
-    for q in questions:
-        ws.append([q.index, q.q_type, q.question, q.options, q.correct_answer])
-    
-    # Save to memory
-    memory_file = io.BytesIO()
-    wb.save(memory_file)
-    memory_file.seek(0)
-    
-    filename = f"quiz_{secure_filename(s.name)}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-    return send_file(
-        memory_file,
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        as_attachment=True,
-        download_name=filename
-    )
-
-@main.route('/admin/session/<session_id>/import_quiz', methods=['POST'])
-def import_quiz_excel(session_id):
-    if not session.get('admin_logged_in'):
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-    
-    from openpyxl import load_workbook
-    from .models import QuizQuestion
-    
-    try:
-        wb = load_workbook(file)
-        ws = wb.active
-        
-        # Optionally clear existing questions? User didn't specify, but usually expected.
-        # Let's keep existing for now or just append. 
-        # Actually, let's clear existing to make it a "sync".
-        QuizQuestion.query.filter_by(session_id=session_id).delete()
-        
-        # Skip header row
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row[2]: continue # Skip if no question text
-            
-            new_q = QuizQuestion(
-                session_id=session_id,
-                index=row[0] if row[0] is not None else 0,
-                q_type=row[1] if row[1] else 'choice',
-                question=str(row[2]),
-                options=str(row[3]) if row[3] else "",
-                correct_answer=str(row[4]) if row[4] else ""
-            )
-            db.session.add(new_q)
-        
-        db.session.commit()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 @main.route('/upload', methods=['POST'])
 def upload_file():
@@ -715,9 +633,8 @@ def quiz_points():
 # --- ClassQuiz 관리자: 문제 풀 관리 ---
 
 @main.route('/admin/quiz')
+@admin_required
 def admin_quiz():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('main.admin_login'))
     counts = _pool_counts()
     return render_template(
         'admin_quiz.html',
@@ -730,9 +647,8 @@ def admin_quiz():
 
 
 @main.route('/admin/quiz/<subject>/<int:grade>/export')
+@admin_required
 def admin_quiz_export(subject, grade):
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('main.admin_login'))
     if not quiz_config.is_valid_subject(subject) or not quiz_config.is_valid_grade(grade):
         return "Invalid", 404
 
@@ -755,9 +671,8 @@ def admin_quiz_export(subject, grade):
 
 
 @main.route('/admin/quiz/<subject>/<int:grade>/import', methods=['POST'])
+@admin_api_required
 def admin_quiz_import(subject, grade):
-    if not session.get('admin_logged_in'):
-        return jsonify({'error': 'Unauthorized'}), 401
     if not quiz_config.is_valid_subject(subject) or not quiz_config.is_valid_grade(grade):
         return jsonify({'error': 'Invalid subject or grade'}), 400
     if 'file' not in request.files or request.files['file'].filename == '':
@@ -887,10 +802,9 @@ def game_play_spend():
 
 
 @main.route('/admin/grant_points', methods=['POST'])
+@admin_api_required
 def admin_grant_points():
     """관리자: 모든 학생(StudentPoint 보유자)에게 포인트를 일괄 지급."""
-    if not _is_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
 
     amount_raw = request.form.get('amount')
     if amount_raw is None:

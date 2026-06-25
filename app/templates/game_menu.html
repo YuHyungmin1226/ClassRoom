@@ -47,17 +47,7 @@
         {% endfor %}
     </div>
 
-    {% if is_admin %}
-    <div style="margin-top: 30px; background:white; border:1px solid #e2e8f0; border-radius:16px; padding:20px 22px;">
-        <h3 style="margin:0 0 6px;">🛡️ 관리자 — 전체 학생 포인트 지급</h3>
-        <p style="color:#64748b; font-size:.88rem; margin:0 0 14px;">포인트를 가진 모든 학생(기기)에게 한 번에 지급합니다. 음수를 입력하면 차감됩니다(0 미만으로는 내려가지 않음).</p>
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-            <input type="number" id="grantAmount" value="1" style="width:120px; padding:10px 12px; border:2px solid #e2e8f0; border-radius:10px; font-size:1rem;">
-            <button class="btn btn-primary" onclick="grantPoints()">전체 지급</button>
-            <span id="grantMsg" style="font-weight:600; color:#16a34a;"></span>
-        </div>
-    </div>
-    {% endif %}
+
 
     <div style="margin-top: 30px; display:flex; gap:10px;">
         <a href="/" class="btn btn-secondary btn-sm">← 홈으로</a>
@@ -76,20 +66,6 @@
         .then(d => { document.getElementById('myPoints').innerText = d.points; })
         .catch(() => { document.getElementById('myPoints').innerText = '0'; });
 
-    async function grantPoints() {
-        const amount = parseInt(document.getElementById('grantAmount').value, 10);
-        const msg = document.getElementById('grantMsg');
-        if (!amount) { msg.style.color = '#ef4444'; msg.innerText = '0이 아닌 정수를 입력하세요.'; return; }
-        if (!confirm(`모든 학생에게 ${amount} 포인트를 지급할까요?`)) return;
-        try {
-            const res = await fetch('/admin/grant_points', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ amount })
-            });
-            const d = await res.json();
-            if (d.ok) { msg.style.color = '#16a34a'; msg.innerText = `완료: ${d.students}명에게 ${d.amount}P 지급됨`; }
-            else { msg.style.color = '#ef4444'; msg.innerText = '오류: ' + (d.error || '실패'); }
-        } catch (e) { msg.style.color = '#ef4444'; msg.innerText = '네트워크 오류: ' + e; }
-    }
+
 </script>
 {% endblock %}

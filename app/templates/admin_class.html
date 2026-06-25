@@ -6,9 +6,6 @@
     <div class="header-actions">
         <a href="{{ url_for('main.admin_dashboard', type=class_group.class_type) }}" class="btn btn-secondary btn-sm">←
             Back</a>
-        {% if class_group.class_type == 'classquiz' %}
-        <a href="{{ url_for('main.admin_class_quiz_results', class_id=class_group.id) }}" class="btn btn-success btn-sm">📊 Integrated Results</a>
-        {% endif %}
         <form method="POST" action="{{ url_for('main.create_session', class_id=class_group.id) }}" class="inline-form"
             id="createSessionForm">
             <input type="hidden" name="name" id="sessionNameInput">
