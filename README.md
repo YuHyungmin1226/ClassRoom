@@ -51,6 +51,13 @@ python generate_questions.py    # 수학·영어 자동 생성 문제 적재
 python run.py
 ```
 
+### 테스트
+
+```bash
+pip install pytest
+python -m pytest        # 핵심 흐름(퀴즈 채점·포인트·게임 결제·인증·생성기) 검증
+```
+
 > ClassQuiz 문제는 `app/seed_data/*.json`(큐레이션)과 `app/quiz_generators.py`(자동 생성)에서 관리합니다.
 > 관리자 화면 `/admin/quiz`에서 과목·학년별 보유 문항 수를 확인하고 엑셀로 문제를 일괄 추가할 수 있습니다.
 
