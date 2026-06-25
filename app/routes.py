@@ -195,11 +195,17 @@ def reset_data():
         return redirect(url_for('main.admin_login'))
     
     import shutil
+    # 협업(ClassMap/Write/Draw) 데이터
     db.session.query(Flag).delete()
     db.session.query(Session).delete()
     db.session.query(ClassGroup).delete()
+    # ClassQuiz/ClassGame 학생 데이터 (문제 풀 SubjectQuestion 은 콘텐츠이므로 보존)
+    db.session.query(AttemptAnswer).delete()
+    db.session.query(QuizAttempt).delete()
+    db.session.query(GamePlay).delete()
+    db.session.query(StudentPoint).delete()
     db.session.commit()
-    
+
     if os.path.exists(Config.UPLOAD_FOLDER):
         for filename in os.listdir(Config.UPLOAD_FOLDER):
             file_path = os.path.join(Config.UPLOAD_FOLDER, filename)
@@ -211,7 +217,7 @@ def reset_data():
             except Exception as e:
                 print('Failed to delete %s. Reason: %s' % (file_path, e))
                 
-    flash('All data has been successfully reset.')
+    flash('모든 클래스·세션·게시글과 학생 퀴즈 기록·포인트·게임 기록이 초기화되었습니다. (문제 풀은 유지됩니다)')
     return redirect(url_for('main.admin_settings'))
 
 @main.route('/admin/export_markdown')
