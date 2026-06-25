@@ -30,6 +30,9 @@ def create_app():
             db.session.add(default_admin)
             db.session.commit()
 
+        from .seeding import seed_if_empty
+        seed_if_empty()
+
         from .routes import main
         app.register_blueprint(main)
         from . import events

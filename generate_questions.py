@@ -1,8 +1,7 @@
 """ClassQuiz 자동 생성 문제 적재 스크립트.
 
-app/quiz_generators.py 의 생성기로 대량의 문제를 만들어 DB에 넣는다.
-생성 문제는 standard_code='AUTO' 로 표시되며, 재실행 시 해당 과목·학년의
-기존 AUTO 문제만 삭제 후 다시 생성한다(손으로 만든 큐레이션 문제는 보존).
+app/seeding 모듈을 사용하여 대량의 문제를 생성하여 DB에 적재한다.
+생성 문제는 standard_code='AUTO' 로 표시되며, 재실행 시 기존 AUTO 문제만 삭제 후 다시 생성한다.
 
 사용법:
     python generate_questions.py                # math 중1~3 각 1000개 생성
@@ -14,49 +13,8 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from app import create_app, db
-from app.models import SubjectQuestion
-from app.quiz_generators import generate, AUTO_TAG
-from app.quiz_knowledge import generate_knowledge
-
-# 현재 자동 생성을 지원하는 (과목, 학년)
-KNOWLEDGE_SUBJECTS = ('kor', 'sci', 'social')
-SUPPORTED = [
-    ('math', 1), ('math', 2), ('math', 3),
-    ('eng', 1), ('eng', 2), ('eng', 3),
-    ('kor', 1), ('kor', 2), ('kor', 3),
-    ('sci', 1), ('sci', 2), ('sci', 3),
-    ('social', 1), ('social', 2), ('social', 3),
-]
-
-
-def fill(subject, grade, n):
-    SubjectQuestion.query.filter_by(subject=subject, grade=grade, standard_code=AUTO_TAG).delete()
-    if subject in KNOWLEDGE_SUBJECTS:
-        questions = generate_knowledge(subject, grade, n)
-    else:
-        questions = generate(subject, grade, n)
-    for q in questions:
-        db.session.add(SubjectQuestion(
-            subject=subject, grade=grade,
-            unit=q.get('unit'), standard_code=q.get('standard_code'),
-            difficulty=int(q.get('difficulty', 2)),
-            q_type=q.get('q_type', 'short'),
-            question=q['question'],
-            options=q.get('options'),
-            correct_answer=str(q['correct_answer']),
-            explanation=q.get('explanation'),
-        ))
-    db.session.commit()
-    print(f"  [+] {subject} 중{grade}: 자동 생성 {len(questions)}문제 적재 (요청 {n})")
-    return len(questions)
-
-
-# 과목별 기본 자동 생성 개수(미지정 시). 영어·지식 과목은 사전 크기에서
-# 자연히 제한되므로 큰 값을 두고, 수학은 과목 간 균형을 위해 상한을 둔다.
-DEFAULT_N = 1000
-SUBJECT_N = {'math': 270}  # 큐레이션 30 + 270 ≈ 300/학년 (영어·지식 과목과 균형)
-
+from app import create_app
+from app.seeding import seed_generated
 
 def main():
     explicit_n = None
@@ -71,17 +29,9 @@ def main():
 
     app = create_app()
     with app.app_context():
-        print("[+] 자동 생성 문제 적재 시작...")
-        total = 0
-        for subject, grade in SUPPORTED:
-            if filter_subject and subject != filter_subject:
-                continue
-            if filter_grade and grade != filter_grade:
-                continue
-            n = explicit_n if explicit_n is not None else SUBJECT_N.get(subject, DEFAULT_N)
-            total += fill(subject, grade, n)
-        print(f"[+] 완료! 자동 생성 문제 총 {total}개 적재.")
-
+        print("[+] Starting auto questions generation...")
+        total = seed_generated(filter_subject, filter_grade, explicit_n)
+        print(f"[+] Completed! Total {total} auto-generated questions seeded.")
 
 if __name__ == '__main__':
     main()
