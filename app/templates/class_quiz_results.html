@@ -112,6 +112,17 @@
     const sessionIds = JSON.parse(document.getElementById('session-ids-data').textContent);
     const sessionData = {};
 
+    // XSS 방지: 학생이 입력한 author_name 등을 innerHTML에 넣기 전 이스케이프
+    function escapeHTML(str) {
+        if (str === null || str === undefined) return '';
+        return str.toString()
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function toggleAccordion(id) {
         const content = document.getElementById(id);
         const isActive = content.classList.contains('active');
@@ -187,11 +198,11 @@
             const user = grouped[cid];
             const correct = user.list.filter(r => r.is_correct).length;
             const total = user.list.length;
-            const rate = Math.round((correct / total) * 100);
+            const rate = total > 0 ? Math.round((correct / total) * 100) : 0;
 
             html += `
                 <tr>
-                    <td><strong>${user.name}</strong></td>
+                    <td><strong>${escapeHTML(user.name)}</strong></td>
                     <td style="width: 200px;">
                         <div class="progress-bar-container" style="height: 8px;">
                             <div class="progress-bar" style="width: ${rate}%"></div>

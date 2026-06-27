@@ -5,6 +5,7 @@
     <div class="card auth-card">
         <h2>Admin Login</h2>
         <form method="POST" action="{{ url_for('main.admin_login') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-group">
                 <label for="password">Password</label>
                 <input type="password" id="password" name="password" required class="form-control" placeholder="Enter admin password">

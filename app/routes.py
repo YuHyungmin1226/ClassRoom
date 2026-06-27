@@ -7,7 +7,7 @@ import io
 import zipfile
 from datetime import datetime
 from . import db
-from .models import Admin, ClassGroup, Session, Flag
+from .models import Admin, ClassGroup, Session, Flag, QuizQuestion, QuizResponse
 from .config import Config
 
 main = Blueprint('main', __name__)
@@ -93,16 +93,17 @@ def delete_class(class_id):
         return jsonify({'error': 'Unauthorized'}), 401
     c = ClassGroup.query.get_or_404(class_id)
     class_type = c.class_type
-    
+    class_name = c.name  # 삭제 후 접근 방지 위해 미리 캡처
+
     # Safely clean up associated uploaded files from disk
     for s in c.sessions:
         for f in s.flags:
             delete_file_safe(f.file_path)
             delete_file_safe(f.thumbnail_path)
-            
+
     db.session.delete(c)
     db.session.commit()
-    flash(f"Class '{c.name}' has been successfully deleted.")
+    flash(f"Class '{class_name}' has been successfully deleted.")
     return redirect(url_for('main.admin_dashboard', type=class_type))
 
 @main.route('/admin/class/<class_id>')
@@ -143,15 +144,16 @@ def delete_session(session_id):
         return jsonify({'error': 'Unauthorized'}), 401
     s = Session.query.get_or_404(session_id)
     class_id = s.class_id
-    
+    session_name = s.name  # 삭제 후 접근 방지 위해 미리 캡처
+
     # Safely clean up associated uploaded files from disk
     for f in s.flags:
         delete_file_safe(f.file_path)
         delete_file_safe(f.thumbnail_path)
-        
+
     db.session.delete(s)
     db.session.commit()
-    flash(f"Session '{s.name}' has been successfully deleted.")
+    flash(f"Session '{session_name}' has been successfully deleted.")
     return redirect(url_for('main.admin_class', class_id=class_id))
 
 @main.route('/admin/class/<class_id>/quiz_results')
@@ -172,12 +174,22 @@ def admin_settings():
 def change_password():
     if not session.get('admin_logged_in'):
         return redirect(url_for('main.admin_login'))
+    current_password = request.form.get('current_password')
     new_password = request.form.get('new_password')
-    if new_password:
-        admin = Admin.query.first()
-        admin.set_password(new_password)
-        db.session.commit()
-        flash('Password changed successfully.')
+    admin = Admin.query.first()
+
+    # 현재 비밀번호 확인 (CSRF/세션 탈취 시 비밀번호 변경 악용 방지)
+    if not admin or not current_password or not admin.check_password(current_password):
+        flash('현재 비밀번호가 올바르지 않습니다.')
+        return redirect(url_for('main.admin_settings'))
+
+    if not new_password:
+        flash('새 비밀번호를 입력하세요.')
+        return redirect(url_for('main.admin_settings'))
+
+    admin.set_password(new_password)
+    db.session.commit()
+    flash('Password changed successfully.')
     return redirect(url_for('main.admin_settings'))
 
 @main.route('/admin/reset_data', methods=['POST'])
@@ -186,6 +198,10 @@ def reset_data():
         return redirect(url_for('main.admin_login'))
     
     import shutil
+    # 벌크 delete()는 ORM cascade를 타지 않으므로, 자식 테이블부터 명시적으로 모두 삭제한다.
+    # (이전 코드는 QuizQuestion/QuizResponse를 누락해 고아 레코드가 남았음)
+    db.session.query(QuizResponse).delete()
+    db.session.query(QuizQuestion).delete()
     db.session.query(Flag).delete()
     db.session.query(Session).delete()
     db.session.query(ClassGroup).delete()
@@ -297,11 +313,21 @@ def view_session(session_id):
     s = Session.query.get_or_404(session_id)
     if not s.is_active and not session.get('admin_logged_in'):
         return "This session is closed.", 403
-        
+
     is_admin = session.get('admin_logged_in', False)
+
+    # 위조 불가능한 서버측 참여자 식별자 발급 (서명된 Flask 세션에 저장).
+    # 게시물 소유권 검증의 신뢰 기준이 되며, 클라이언트가 보낸 client_id는 신뢰하지 않는다.
+    if not session.get('participant_id'):
+        session['participant_id'] = uuid.uuid4().hex
+        session.permanent = True
+    participant_id = session['participant_id']
+
     if s.class_group.class_type == 'classquiz':
-        return render_template('quiz_session.html', quiz_session=s, is_admin=is_admin)
-    return render_template('map_session.html', map_session=s, is_admin=is_admin)
+        return render_template('quiz_session.html', quiz_session=s,
+                               is_admin=is_admin, participant_id=participant_id)
+    return render_template('map_session.html', map_session=s,
+                           is_admin=is_admin, participant_id=participant_id)
 
 @main.route('/admin/session/<session_id>/export_quiz')
 def export_quiz_excel(session_id):
@@ -352,34 +378,35 @@ def import_quiz_excel(session_id):
         return jsonify({'error': 'No selected file'}), 400
     
     from openpyxl import load_workbook
-    from .models import QuizQuestion
-    
+
     try:
         wb = load_workbook(file)
         ws = wb.active
-        
-        # Optionally clear existing questions? User didn't specify, but usually expected.
-        # Let's keep existing for now or just append. 
-        # Actually, let's clear existing to make it a "sync".
+
+        # 기존 문제를 새 파일로 "동기화"(교체)한다.
+        # 교체될 문제에 달린 응답이 고아로 남지 않도록 먼저 삭제한다.
+        QuizResponse.query.filter_by(session_id=session_id).delete()
         QuizQuestion.query.filter_by(session_id=session_id).delete()
-        
+
         # Skip header row
         for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row[2]: continue # Skip if no question text
-            
+            if not row or len(row) < 3 or not row[2]:
+                continue  # Skip if no question text
+
             new_q = QuizQuestion(
                 session_id=session_id,
                 index=row[0] if row[0] is not None else 0,
                 q_type=row[1] if row[1] else 'choice',
                 question=str(row[2]),
-                options=str(row[3]) if row[3] else "",
-                correct_answer=str(row[4]) if row[4] else ""
+                options=str(row[3]) if len(row) > 3 and row[3] else "",
+                correct_answer=str(row[4]) if len(row) > 4 and row[4] else ""
             )
             db.session.add(new_q)
-        
+
         db.session.commit()
         return jsonify({'success': True})
     except Exception as e:
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 @main.route('/upload', methods=['POST'])
@@ -402,11 +429,12 @@ def upload_file():
         thumbnail_path = None
         if filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'gif'}:
             try:
-                img = Image.open(filepath)
-                img.thumbnail((150, 150))
-                thumb_filename = f"thumb_{unique_filename}"
-                thumb_filepath = os.path.join(Config.UPLOAD_FOLDER, thumb_filename)
-                img.save(thumb_filepath)
+                # with 블록으로 파일 핸들 누수 방지 (eventlet 다중 요청 환경)
+                with Image.open(filepath) as img:
+                    img.thumbnail((150, 150))
+                    thumb_filename = f"thumb_{unique_filename}"
+                    thumb_filepath = os.path.join(Config.UPLOAD_FOLDER, thumb_filename)
+                    img.save(thumb_filepath)
                 thumbnail_path = f"uploads/{thumb_filename}"
             except Exception as e:
                 print(f"Error creating thumbnail: {e}")

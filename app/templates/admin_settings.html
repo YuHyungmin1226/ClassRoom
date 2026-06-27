@@ -14,9 +14,14 @@
     <div>
         <h3 style="margin-top: 0; font-size: 1.2em; margin-bottom: 15px; color: #334155;">Change Password</h3>
         <form method="POST" action="{{ url_for('main.change_password') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-group" style="margin-bottom: 25px;">
+                <label for="current_password" style="display: block; margin-bottom: 8px; font-weight: 500; color: #475569;">Current Password</label>
+                <input type="password" id="current_password" name="current_password" class="form-control" placeholder="Enter current password" style="width: 100%; box-sizing: border-box;" required>
+            </div>
             <div class="form-group" style="margin-bottom: 25px;">
                 <label for="new_password" style="display: block; margin-bottom: 8px; font-weight: 500; color: #475569;">New Password</label>
-                <input type="password" id="new_password" name="new_password" class="form-control" placeholder="Enter a strong new password" style="width: 100%; box-sizing: border-box;">
+                <input type="password" id="new_password" name="new_password" class="form-control" placeholder="Enter a strong new password" style="width: 100%; box-sizing: border-box;" required>
             </div>
             <div style="display: flex; justify-content: flex-end; gap: 12px; align-items: stretch;">
                 <a href="{{ url_for('main.admin_dashboard') }}" class="btn btn-secondary" style="text-decoration: none; display: flex; align-items: center; justify-content: center; margin: 0;">Cancel</a>
@@ -41,6 +46,7 @@
             This action will permanently delete all Classes, Sessions, Notes (Flags), and uploaded files. This cannot be undone.
         </p>
         <form method="POST" action="{{ url_for('main.reset_data') }}" onsubmit="return confirm('Are you ABSOLUTELY sure you want to delete all data? This action cannot be undone!');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-danger" style="width: 100%;">Reset All Data</button>
         </form>
     </div>

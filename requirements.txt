@@ -1,7 +1,10 @@
-Flask==2.3.3
+# Flask는 Werkzeug 3.x와 정합하도록 3.0+ 사용 (기존 Flask 2.3.3 + Werkzeug 3.1.8 조합은
+# 비표준이며 클린 설치 시 import 오류 위험이 있었음)
+Flask>=3.0.3,<3.2
+Werkzeug>=3.0.6
 Flask-SocketIO==5.6.1
-Flask-SQLAlchemy==3.0.5
-Pillow==12.0.0
-Werkzeug==3.1.8
-eventlet==0.33.3
-openpyxl
+Flask-SQLAlchemy>=3.1.1
+Flask-WTF>=1.2.1          # CSRF 보호 (CSRFProtect)
+Pillow>=10.4.0
+eventlet>=0.35.2          # Python 3.12+ 호환
+openpyxl>=3.1.0

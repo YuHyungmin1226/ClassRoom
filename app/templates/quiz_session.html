@@ -477,12 +477,32 @@
         marked.setOptions({ breaks: true, gfm: true });
         return DOMPurify.sanitize(marked.parse(text));
     }
+
+    // XSS 방지: 사용자 입력을 innerHTML/속성에 넣기 전 이스케이프
+    function escapeHTML(str) {
+        if (str === null || str === undefined) return '';
+        return str.toString()
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     const isAdmin = "{{ is_admin }}" === "True";
-    
-    let clientId = localStorage.getItem('classroom_client_id');
+
+    // CSRF 토큰 (fetch POST에 헤더로 전달)
+    const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+    // 소유자 식별자: 서버가 발급한 위조 불가 participant_id를 우선 사용.
+    // (서버 권한 검증이 이 값을 기준으로 하므로 클라이언트도 동일 값을 사용해야 소유 UI가 일치)
+    let clientId = "{{ participant_id }}";
     if (!clientId) {
-        clientId = 'client_' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('classroom_client_id', clientId);
+        clientId = localStorage.getItem('classroom_client_id');
+        if (!clientId) {
+            clientId = 'client_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('classroom_client_id', clientId);
+        }
     }
 
     let allQuestions = []; // Full list from server
@@ -510,6 +530,19 @@
     }
 
     // --- Question Management (Admin) ---
+    // 문제 입력 검증: 객관식은 보기 2개 이상 + 정답 필요, 단답형은 정답 필요
+    function validateQuestionInputs(index, type, text, options, correct) {
+        if (!index || !text) { alert("Please fill all fields"); return false; }
+        if (type === 'choice') {
+            const opts = (options || '').split('|').map(s => s.trim()).filter(Boolean);
+            if (opts.length < 2) { alert("객관식은 보기를 '|'로 구분해 2개 이상 입력하세요."); return false; }
+            if (!correct) { alert("정답(보기 번호)을 입력하세요."); return false; }
+        } else if (type === 'short') {
+            if (!correct) { alert("단답형 정답을 입력하세요."); return false; }
+        }
+        return true;
+    }
+
     function addQuestion() {
         const index = document.getElementById('q_index').value;
         const type = document.getElementById('q_type').value;
@@ -517,7 +550,7 @@
         const options = document.getElementById('q_options').value;
         const correct = document.getElementById('q_correct').value;
 
-        if (!index || !text) return alert("Please fill all fields");
+        if (!validateQuestionInputs(index, type, text, options, correct)) return;
 
         socket.emit('add_quiz_question', {
             session_id: sessionId,
@@ -571,7 +604,7 @@
         const options = document.getElementById('q_options').value;
         const correct = document.getElementById('q_correct').value;
 
-        if (!index || !text) return alert("Please fill all fields");
+        if (!validateQuestionInputs(index, type, text, options, correct)) return;
 
         socket.emit('edit_quiz_question', {
             session_id: sessionId,
@@ -618,6 +651,7 @@
         try {
             const res = await fetch('/upload', {
                 method: 'POST',
+                headers: { 'X-CSRFToken': CSRF_TOKEN },
                 body: formData
             });
             const data = await res.json();
@@ -648,6 +682,7 @@
 
         fetch(`/admin/session/${sessionId}/import_quiz`, {
             method: 'POST',
+            headers: { 'X-CSRFToken': CSRF_TOKEN },
             body: formData
         })
         .then(res => res.json())
@@ -682,8 +717,9 @@
             options = q.options.split('|').map(p => p.trim()).filter(p => p);
         }
 
-        // Check if multi-select (if correct_answer contains comma)
-        const isMultiSelect = q.correct_answer && q.correct_answer.includes(',');
+        // 복수정답 여부: 학생에게는 정답이 숨겨지므로 서버가 보낸 is_multi를 사용.
+        // (관리자는 correct_answer를 받으므로 둘 중 하나로 판별)
+        const isMultiSelect = q.is_multi || (q.correct_answer && q.correct_answer.includes(','));
 
         let html = `
             <div class="quiz-card animate__animated animate__fadeIn">
@@ -704,7 +740,7 @@
                 html += `
                     <button class="option-btn ${isSelected ? 'selected' : ''}" onclick="toggleChoice('${q.id}', '${val}', ${isMultiSelect})">
                         <div class="option-circle"></div>
-                        <span>${opt}</span>
+                        <span>${escapeHTML(opt)}</span>
                     </button>
                 `;
             });
@@ -720,18 +756,18 @@
         } else if (q.q_type === 'short') {
             html += `
                 <div class="input-group">
-                    <input type="text" class="quiz-input" id="short-input" 
-                        placeholder="Type your answer here..." 
-                        value="${myResponses[q.id] || ''}"
+                    <input type="text" class="quiz-input" id="short-input"
+                        placeholder="Type your answer here..."
+                        value="${escapeHTML(myResponses[q.id] || '')}"
                         onchange="submitAnswer('${q.id}', this.value)">
                 </div>
             `;
         } else {
             html += `
                 <div class="input-group">
-                    <textarea class="quiz-input" id="long-input" rows="5" 
+                    <textarea class="quiz-input" id="long-input" rows="5"
                         placeholder="Write your detailed thoughts..."
-                        onchange="submitAnswer('${q.id}', this.value)">${myResponses[q.id] || ''}</textarea>
+                        onchange="submitAnswer('${q.id}', this.value)">${escapeHTML(myResponses[q.id] || '')}</textarea>
                 </div>
             `;
         }
@@ -863,7 +899,7 @@
 
     // --- Socket Events ---
     socket.on('connect', () => {
-        socket.emit('join', { session_id: sessionId });
+        socket.emit('join', { session_id: sessionId, client_id: clientId });
     });
 
     socket.on('load_quiz_questions', (data) => {
@@ -951,8 +987,8 @@
                     <td>${q.index}</td>
                     <td><span class="question-type-badge type-${q.q_type}">${q.q_type}</span></td>
                     <td class="question-content" style="max-width: 400px;">${renderMarkdown(q.question)}</td>
-                    <td>${q.options || '-'}</td>
-                    <td><strong>${correctText}</strong></td>
+                    <td>${escapeHTML(q.options) || '-'}</td>
+                    <td><strong>${escapeHTML(correctText)}</strong></td>
                     <td style="vertical-align: middle;">
                         <div style="display: flex; gap: 5px; justify-content: center; align-items: center;">
                             <button class="btn btn-secondary btn-sm" onclick="startEdit('${q.id}')">Edit</button>
@@ -1023,8 +1059,8 @@
             html += `
                 <tr style="cursor: pointer;" onclick="toggleStudentDetails('${cid}')">
                     <td>
-                        <div style="font-weight: 700; color: #1e293b;">${user.name}</div>
-                        <div style="font-size: 0.75rem; color: #64748b;">ID: ${cid.substr(0,8)}</div>
+                        <div style="font-weight: 700; color: #1e293b;">${escapeHTML(user.name)}</div>
+                        <div style="font-size: 0.75rem; color: #64748b;">ID: ${escapeHTML(cid.substr(0,8))}</div>
                     </td>
                     <td>
                         <div class="progress-bar-container" style="height: 8px; margin-bottom: 4px;">
@@ -1052,7 +1088,7 @@
                                 return `
                                     <div style="background: white; padding: 8px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 0.85rem;">
                                         <span style="font-weight: 700; color: #64748b;">Q${qNum}:</span>
-                                        <span class="${correctClass}">${decodeAnswer(q, r.response)}</span>
+                                        <span class="${correctClass}">${escapeHTML(decodeAnswer(q, r.response))}</span>
                                     </div>
                                 `;
                             }).join('')}

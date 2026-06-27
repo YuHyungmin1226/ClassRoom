@@ -11,6 +11,7 @@
         {% endif %}
         <form method="POST" action="{{ url_for('main.create_session', class_id=class_group.id) }}" class="inline-form"
             id="createSessionForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="name" id="sessionNameInput">
             <button type="button" class="btn btn-primary btn-sm" onclick="promptSessionName()">+ New Session</button>
         </form>
@@ -42,6 +43,7 @@
                         Session</a>
                     <form method="POST" action="{{ url_for('main.close_session', session_id=s.id) }}"
                         class="inline-form" style="margin: 0; display: flex;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-danger btn-sm"
                             style="height: 100%; display: flex; align-items: center; justify-content: center; margin: 0;">Close</button>
                     </form>
@@ -67,6 +69,7 @@
                         style="display: flex; align-items: center; justify-content: center; margin: 0;">View Archive</a>
                     <form method="POST" action="{{ url_for('main.delete_session', session_id=s.id) }}"
                         class="inline-form" style="margin: 0; display: flex;" onsubmit="return confirm('세션과 작성된 모든 노드가 영구 삭제됩니다. 정말 삭제하시겠습니까?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-danger btn-sm"
                             style="height: 100%; display: flex; align-items: center; justify-content: center; margin: 0;">Delete</button>
                     </form>

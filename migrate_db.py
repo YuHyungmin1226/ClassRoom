@@ -27,6 +27,14 @@ def column_exists(cursor, table_name, column_name):
     columns = [row[1] for row in cursor.fetchall()]
     return column_name in columns
 
+def table_exists(cursor, table_name):
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+    return cursor.fetchone() is not None
+
+def index_exists(cursor, index_name):
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name=?", (index_name,))
+    return cursor.fetchone() is not None
+
 def migrate():
     if not backup_db():
         return
@@ -51,7 +59,34 @@ def migrate():
             print("    -> 성공!")
         else:
             print("    -> flag 테이블은 이미 최신 상태입니다.")
-            
+
+        # 3. quiz_response 중복 응답 정리 + 유니크 인덱스 생성
+        #    (한 참여자가 한 문제에 응답 1건만 가지도록 보장)
+        if table_exists(cursor, 'quiz_response'):
+            if not index_exists(cursor, 'uq_response_session_question_client'):
+                print("    -> quiz_response 중복 응답을 정리하고 유니크 인덱스를 생성합니다...")
+                # 동일 (session_id, question_id, client_id) 그룹에서 가장 최근(id 최대) 한 건만 보존
+                cursor.execute(
+                    """
+                    DELETE FROM quiz_response
+                    WHERE id NOT IN (
+                        SELECT MAX(id) FROM quiz_response
+                        GROUP BY session_id, question_id, client_id
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_response_session_question_client
+                    ON quiz_response (session_id, question_id, client_id)
+                    """
+                )
+                print("    -> 성공!")
+            else:
+                print("    -> quiz_response 인덱스는 이미 최신 상태입니다.")
+        else:
+            print("    -> quiz_response 테이블이 아직 없습니다 (서버 최초 실행 시 자동 생성).")
+
         conn.commit()
         print("\n[+] 모든 마이그레이션이 성공적으로 완료되었습니다!")
         print("[+] 기존 데이터가 유지된 채 최신 버전과 완벽하게 호환됩니다. 이제 플랫폼을 실행하셔도 좋습니다.")

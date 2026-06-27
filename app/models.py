@@ -16,7 +16,7 @@ class Admin(db.Model):
 class ClassGroup(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = db.Column(db.String(100), nullable=False)
-    class_type = db.Column(db.String(20), nullable=False, default='classmap') # 'classmap', 'classwrite', or 'classdraw'
+    class_type = db.Column(db.String(20), nullable=False, default='classmap') # 'classmap', 'classwrite', 'classdraw', or 'classquiz'
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_active = db.Column(db.Boolean, default=True)
     
@@ -67,3 +67,9 @@ class QuizResponse(db.Model):
     response = db.Column(db.Text, nullable=False)
     is_correct = db.Column(db.Boolean, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # 한 참여자는 한 문제에 응답 1건만 — 중복 응답(경쟁 조건) 방지
+    __table_args__ = (
+        db.UniqueConstraint('session_id', 'question_id', 'client_id',
+                            name='uq_response_session_question_client'),
+    )

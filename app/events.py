@@ -3,10 +3,54 @@ from . import socketio, db
 from .models import Flag, QuizQuestion, QuizResponse, Session
 from flask import request, session
 
+
+def _admin_room(session_id):
+    """관리자 전용 하위 룸 이름 — 학생 응답을 학생끼리 보지 못하도록 분리"""
+    return f"{session_id}:admins"
+
+
+def _serialize_question(q, include_answer):
+    """퀴즈 문제 직렬화. 정답(correct_answer)은 관리자에게만 포함.
+    학생에게는 정답을 숨기되, 객관식 복수정답 여부(is_multi)는 UI 렌더에 필요하므로 전달한다.
+    """
+    data = {
+        'id': q.id,
+        'index': q.index,
+        'q_type': q.q_type,
+        'question': q.question,
+        'options': q.options,
+        'is_multi': bool(q.correct_answer and ',' in q.correct_answer),
+    }
+    if include_answer:
+        data['correct_answer'] = q.correct_answer
+    return data
+
+
+def _current_participant_id():
+    """서버가 신뢰하는 참여자 식별자.
+    view_session(HTTP) 진입 시 Flask 세션에 저장된 서명된 값으로, 위조가 불가능하다.
+    클라이언트가 보낸 client_id는 신뢰하지 않는다.
+    """
+    return session.get('participant_id')
+
 @socketio.on('join')
 def on_join(data):
-    room = data['session_id']
+    room = data.get('session_id')
+    if not room:
+        return
+
+    is_admin = session.get('admin_logged_in', False)
+
+    # 세션 존재/활성 여부 검증 — 닫혔거나 없는 세션은 비관리자에게 데이터 미제공
+    sess = Session.query.get(room)
+    if not sess or (not sess.is_active and not is_admin):
+        emit('join_rejected', {'session_id': room}, to=request.sid)
+        return
+
     join_room(room)
+    if is_admin:
+        join_room(_admin_room(room))
+
     # Send existing flags to the user who just joined
     flags = Flag.query.filter_by(session_id=room).all()
     flags_data = [{
@@ -23,24 +67,13 @@ def on_join(data):
     } for f in flags]
     emit('load_flags', flags_data, to=request.sid)
 
-    # Quiz Questions
+    # Quiz Questions — 정답은 관리자에게만 포함
     questions = QuizQuestion.query.filter_by(session_id=room).order_by(QuizQuestion.index).all()
-    q_data = [{
-        'id': q.id,
-        'index': q.index,
-        'q_type': q.q_type,
-        'question': q.question,
-        'options': q.options,
-        'correct_answer': q.correct_answer
-    } for q in questions]
+    q_data = [_serialize_question(q, is_admin) for q in questions]
     emit('load_quiz_questions', q_data, to=request.sid)
 
-    # Participant's own responses
-    client_id = request.args.get('client_id') # Note: client_id might need to be sent in join or inferred
-    # Actually, the client handles its own client_id. We can filter by client_id if provided.
-    
-    # Send all responses to Admin
-    if session.get('admin_logged_in'):
+    if is_admin:
+        # 관리자에게는 전체 응답 전송
         responses = QuizResponse.query.filter_by(session_id=room).all()
         r_data = [{
             'id': r.id,
@@ -52,10 +85,16 @@ def on_join(data):
         } for r in responses]
         emit('load_all_responses', r_data, to=request.sid)
     else:
-        # If we had a way to get client_id here, we'd filter. 
-        # For now, let the client emit a 'get_my_responses' event if needed, 
-        # or we just rely on local state since it's a live session.
-        pass
+        # 학생에게는 본인 응답만 복원 (새로고침 시 답안/채점 상태 유지)
+        pid = _current_participant_id() or data.get('client_id')
+        if pid:
+            my = QuizResponse.query.filter_by(session_id=room, client_id=pid).all()
+            my_data = [{
+                'question_id': r.question_id,
+                'response': r.response,
+                'is_correct': r.is_correct
+            } for r in my]
+            emit('load_my_responses', my_data, to=request.sid)
 
 @socketio.on('leave')
 def on_leave(data):
@@ -72,9 +111,11 @@ def on_add_flag(data):
     file_path = data.get('file_path')
     thumbnail_path = data.get('thumbnail_path')
     author_name = data.get('author_name', 'Participant')
-    client_id = data.get('client_id')
+    # 소유자 식별은 서버가 신뢰하는 participant_id 사용 (클라이언트 위조 방지).
+    # 세션 값이 없을 때만(예외적) 클라이언트 값으로 폴백.
+    client_id = _current_participant_id() or data.get('client_id')
     post_type = data.get('post_type', 'normal')
-    
+
     # Permission check: Only admin can create notice or objective
     is_admin = session.get('admin_logged_in', False)
     if not is_admin and post_type in ['notice', 'objective']:
@@ -120,8 +161,8 @@ def on_edit_flag(data):
     if flag:
         # Authorization check: Admin or the person who created the flag
         is_admin = session.get('admin_logged_in', False)
-        requester_client_id = data.get('client_id')
-        
+        requester_client_id = _current_participant_id() or data.get('client_id')
+
         # Permission check:
         # 1. If it's a notice or objective, ONLY admin can edit.
         # 2. Otherwise, admin OR the owner can edit.
@@ -170,16 +211,18 @@ def on_delete_flag(data):
         flag = Flag.query.get(int(flag_id))
     except (TypeError, ValueError):
         flag = Flag.query.get(flag_id)
-        
+
     if flag:
+        # 브로드캐스트에는 DB의 실제 PK(정수)를 사용 — 클라이언트 DOM 매칭 불일치 방지
+        canonical_id = flag.id
         # Permission check:
         # 1. If it's a notice or objective, ONLY admin can delete.
         # 2. Otherwise, admin OR the owner can delete.
         is_admin = session.get('admin_logged_in', False)
-        requester_client_id = data.get('client_id')
-        
+        requester_client_id = _current_participant_id() or data.get('client_id')
+
         is_special_type = flag.post_type in ['notice', 'objective']
-        
+
         if is_special_type:
             if not is_admin:
                 print(f"Unauthorized delete attempt for special type {flag.post_type} by client {requester_client_id}")
@@ -188,11 +231,11 @@ def on_delete_flag(data):
             if not is_admin and flag.client_id != requester_client_id:
                 print(f"Unauthorized delete attempt for flag {flag_id} by client {requester_client_id}")
                 return
- 
+
         db.session.delete(flag)
         db.session.commit()
-        
-        emit('flag_deleted', {'id': flag_id, 'session_id': session_id}, to=session_id)
+
+        emit('flag_deleted', {'id': canonical_id, 'session_id': session_id}, to=session_id)
         
 @socketio.on('draw_data')
 def on_draw_data(data):
@@ -279,40 +322,56 @@ def on_delete_quiz_question(data):
 def on_submit_quiz_response(data):
     session_id = data.get('session_id')
     q_id = data.get('question_id')
-    client_id = data.get('client_id')
+    # 소유자 식별은 서버 신뢰 값 사용
+    client_id = _current_participant_id() or data.get('client_id')
     response_text = data.get('response')
     author_name = data.get('author_name', 'Participant')
 
-    # Check for existing response by this client for this question
-    resp = QuizResponse.query.filter_by(session_id=session_id, question_id=q_id, client_id=client_id).first()
-    
-    # Grading logic
-    q = QuizQuestion.query.get(q_id)
-    is_correct = False
-    if q:
-        if q.q_type == 'long':
-            is_correct = bool(response_text and response_text.strip())
-        elif q.q_type in ['choice', 'short']:
-            if q.correct_answer:
-                is_correct = (str(response_text).strip().lower() == str(q.correct_answer).strip().lower())
+    # 입력 검증: 문제/응답/식별자가 없으면 무시 (NOT NULL 위반 및 세션 오염 방지)
+    q = QuizQuestion.query.get(q_id) if q_id is not None else None
+    if not q or not client_id or response_text is None:
+        return
 
-    if resp:
+    # Grading logic
+    is_correct = False
+    if q.q_type == 'long':
+        is_correct = bool(response_text and response_text.strip())
+    elif q.q_type in ['choice', 'short']:
+        if q.correct_answer:
+            is_correct = (str(response_text).strip().lower() == str(q.correct_answer).strip().lower())
+
+    try:
+        # Check for existing response by this client for this question
+        resp = QuizResponse.query.filter_by(
+            session_id=session_id, question_id=q_id, client_id=client_id).first()
+        if resp:
+            resp.response = response_text
+            resp.is_correct = is_correct
+            resp.author_name = author_name
+        else:
+            resp = QuizResponse(
+                session_id=session_id,
+                question_id=q_id,
+                client_id=client_id,
+                author_name=author_name,
+                response=response_text,
+                is_correct=is_correct
+            )
+            db.session.add(resp)
+        db.session.commit()
+    except Exception as e:
+        # 유니크 제약 경쟁 등으로 실패 시 롤백 후 기존 응답을 갱신 (세션 오염 방지)
+        db.session.rollback()
+        resp = QuizResponse.query.filter_by(
+            session_id=session_id, question_id=q_id, client_id=client_id).first()
+        if not resp:
+            print(f"Failed to save quiz response: {e}")
+            return
         resp.response = response_text
         resp.is_correct = is_correct
         resp.author_name = author_name
-    else:
-        resp = QuizResponse(
-            session_id=session_id,
-            question_id=q_id,
-            client_id=client_id,
-            author_name=author_name,
-            response=response_text,
-            is_correct=is_correct
-        )
-        db.session.add(resp)
-    
-    db.session.commit()
-    
+        db.session.commit()
+
     resp_data = {
         'id': resp.id,
         'question_id': resp.question_id,
@@ -321,9 +380,9 @@ def on_submit_quiz_response(data):
         'response': resp.response,
         'is_correct': resp.is_correct
     }
-    
-    # Notify admin
-    emit('new_response', resp_data, to=session_id)
+
+    # 응답 원문은 관리자 전용 룸에만 전송 (다른 학생에게 노출 금지)
+    emit('new_response', resp_data, to=_admin_room(session_id))
     # Notify the student specifically about their own response (for live grading)
     emit('my_response_update', resp_data, to=request.sid)
 
@@ -346,12 +405,10 @@ def on_get_admin_results(data):
 
 def broadcast_questions(session_id):
     questions = QuizQuestion.query.filter_by(session_id=session_id).order_by(QuizQuestion.index).all()
-    q_data = [{
-        'id': q.id,
-        'index': q.index,
-        'q_type': q.q_type,
-        'question': q.question,
-        'options': q.options,
-        'correct_answer': q.correct_answer
-    } for q in questions]
-    emit('quiz_update', q_data, to=session_id)
+    # 학생 룸에는 정답 제거 버전 전송
+    student_data = [_serialize_question(q, include_answer=False) for q in questions]
+    emit('quiz_update', student_data, to=session_id)
+    # 변경을 일으킨 관리자에게는 정답 포함 버전을 별도 전송 (관리 화면 갱신용)
+    if session.get('admin_logged_in'):
+        admin_data = [_serialize_question(q, include_answer=True) for q in questions]
+        emit('quiz_update', admin_data, to=request.sid)

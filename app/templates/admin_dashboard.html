@@ -6,6 +6,7 @@
     <div class="header-actions">
         <a href="{{ url_for('main.admin_classroom') }}" class="btn btn-secondary btn-sm">← Back</a>
         <form method="POST" action="{{ url_for('main.create_class') }}" class="inline-form" id="createClassForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="name" id="classNameInput">
             <input type="hidden" name="class_type" value="{{ current_type }}">
             <button type="button" class="btn btn-primary btn-sm" onclick="promptClassName()">+ New Class</button>
@@ -35,6 +36,7 @@ function promptClassName() {
                     <div style="display: flex; gap: 10px; align-items: stretch;">
                         <a href="{{ url_for('main.admin_class', class_id=c.id) }}" class="btn btn-primary btn-sm" style="flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; margin: 0;">Enter Class</a>
                         <form method="POST" action="{{ url_for('main.close_class', class_id=c.id) }}" style="margin: 0; display: flex;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-danger btn-sm" style="height: 100%; display: flex; align-items: center; justify-content: center; margin: 0;">Close</button>
                         </form>
                     </div>
@@ -57,6 +59,7 @@ function promptClassName() {
                     <div style="display: flex; gap: 10px; align-items: stretch;">
                         <a href="{{ url_for('main.admin_class', class_id=c.id) }}" class="btn btn-secondary btn-sm" style="flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; margin: 0;">View</a>
                         <form method="POST" action="{{ url_for('main.delete_class', class_id=c.id) }}" style="margin: 0; display: flex;" onsubmit="return confirm('클래스와 포함된 모든 세션 및 작성된 노드가 영구 삭제됩니다. 정말 삭제하시겠습니까?');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-danger btn-sm" style="height: 100%; display: flex; align-items: center; justify-content: center; margin: 0;">Delete</button>
                         </form>
                     </div>

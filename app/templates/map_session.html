@@ -624,11 +624,17 @@
     const socket = io();
     let map;
     
-    // Authorization: Client ID
-    let clientId = localStorage.getItem('classroom_client_id');
+    // CSRF 토큰 (fetch POST 헤더용)
+    const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+    // Authorization: 서버가 발급한 위조 불가 participant_id를 우선 사용
+    let clientId = "{{ participant_id }}";
     if (!clientId) {
-        clientId = 'client_' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('classroom_client_id', clientId);
+        clientId = localStorage.getItem('classroom_client_id');
+        if (!clientId) {
+            clientId = 'client_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('classroom_client_id', clientId);
+        }
     }
     const isAdmin = "{{ is_admin }}" === "True";
     
@@ -804,12 +810,15 @@
                 attribution: '© OpenStreetMap'
             }).addTo(map);
 
-            // Attempt to center map by IP roughly
-            fetch('http://ip-api.com/json/')
+            // Attempt to center map by IP roughly.
+            // HTTPS 지원 엔드포인트 사용 (기존 http://ip-api.com 은 HTTPS 페이지에서 mixed-content로 차단됨)
+            fetch('https://ipapi.co/json/')
                 .then(res => res.json())
                 .then(data => {
-                    if (data.status === 'success') {
-                        map.setView([data.lat, data.lon], 12);
+                    const lat = parseFloat(data.latitude);
+                    const lon = parseFloat(data.longitude);
+                    if (!isNaN(lat) && !isNaN(lon)) {
+                        map.setView([lat, lon], 12);
                     }
                 })
                 .catch(err => console.log("IP geolocation failed", err));
@@ -850,8 +859,10 @@
             });
         }
 
-        // Join Socket.io room
-        socket.emit('join', {session_id: sessionId});
+        // Join Socket.io room — 'connect'에 바인딩해 재연결 시에도 자동으로 다시 참여
+        socket.on('connect', function() {
+            socket.emit('join', {session_id: sessionId, client_id: clientId});
+        });
 
         socket.on('load_flags', function(flags) {
             flags.forEach(f => {
@@ -927,6 +938,8 @@
     });
 
     function addFlagToView(flag) {
+        // 재연결 시 load_flags가 재전송되거나 new_flag가 중복 도착해도 같은 id는 한 번만 추가
+        if (allFlags.some(f => f.id === flag.id)) return;
         allFlags.push(flag); // Keep track of all flags
         if (classType === 'classmap') {
             if(flag.x !== null && flag.y !== null) {
@@ -1392,6 +1405,7 @@
             try {
                 const response = await fetch('/upload', {
                     method: 'POST',
+                    headers: { 'X-CSRFToken': CSRF_TOKEN },
                     body: formData
                 });
                 const data = await response.json();
