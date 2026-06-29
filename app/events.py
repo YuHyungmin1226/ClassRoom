@@ -26,6 +26,47 @@ def _serialize_question(q, include_answer):
     return data
 
 
+def _serialize_flag(f):
+    return {
+        'id': f.id,
+        'region_id': f.region_id,
+        'x': f.x,
+        'y': f.y,
+        'text_content': f.text_content,
+        'file_path': f.file_path,
+        'thumbnail_path': f.thumbnail_path,
+        'author_name': f.author_name,
+        'client_id': f.client_id,
+        'post_type': f.post_type,
+        'created_at': f.created_at.isoformat() if f.created_at else None,
+    }
+
+
+def _normalize_answer(value):
+    return str(value or '').strip().lower()
+
+
+def _choice_answer_values(question, response_text):
+    """Return canonical option numbers for a choice answer."""
+    raw_values = [part.strip() for part in str(response_text or '').split(',') if part.strip()]
+    if not raw_values:
+        return []
+
+    options = [part.strip() for part in (question.options or '').split('|')]
+    option_lookup = {_normalize_answer(option): str(idx + 1) for idx, option in enumerate(options)}
+    values = []
+    for raw in raw_values:
+        if raw.isdigit():
+            idx = int(raw) - 1
+            if 0 <= idx < len(options):
+                values.append(str(idx + 1))
+        else:
+            option_idx = option_lookup.get(_normalize_answer(raw))
+            if option_idx:
+                values.append(option_idx)
+    return sorted(set(values))
+
+
 def _current_participant_id():
     """서버가 신뢰하는 참여자 식별자.
     view_session(HTTP) 진입 시 Flask 세션에 저장된 서명된 값으로, 위조가 불가능하다.
@@ -53,18 +94,7 @@ def on_join(data):
 
     # Send existing flags to the user who just joined
     flags = Flag.query.filter_by(session_id=room).all()
-    flags_data = [{
-        'id': f.id,
-        'region_id': f.region_id,
-        'x': f.x,
-        'y': f.y,
-        'text_content': f.text_content,
-        'file_path': f.file_path,
-        'thumbnail_path': f.thumbnail_path,
-        'author_name': f.author_name,
-        'client_id': f.client_id,
-        'post_type': f.post_type
-    } for f in flags]
+    flags_data = [_serialize_flag(f) for f in flags]
     emit('load_flags', flags_data, to=request.sid)
 
     # Quiz Questions — 정답은 관리자에게만 포함
@@ -136,18 +166,7 @@ def on_add_flag(data):
     db.session.add(new_flag)
     db.session.commit()
 
-    flag_data = {
-        'id': new_flag.id,
-        'region_id': new_flag.region_id,
-        'x': new_flag.x,
-        'y': new_flag.y,
-        'text_content': new_flag.text_content,
-        'file_path': new_flag.file_path,
-        'thumbnail_path': new_flag.thumbnail_path,
-        'author_name': new_flag.author_name,
-        'client_id': new_flag.client_id,
-        'post_type': new_flag.post_type
-    }
+    flag_data = _serialize_flag(new_flag)
     
     # Broadcast to everyone in the room (session)
     emit('new_flag', flag_data, to=session_id)
@@ -187,18 +206,7 @@ def on_edit_flag(data):
             
         db.session.commit()
         
-        flag_data = {
-            'id': flag.id,
-            'region_id': flag.region_id,
-            'x': flag.x,
-            'y': flag.y,
-            'text_content': flag.text_content,
-            'file_path': flag.file_path,
-            'thumbnail_path': flag.thumbnail_path,
-            'author_name': flag.author_name,
-            'client_id': flag.client_id,
-            'post_type': flag.post_type
-        }
+        flag_data = _serialize_flag(flag)
         
         emit('flag_edited', flag_data, to=session_id)
 
@@ -314,6 +322,7 @@ def on_delete_quiz_question(data):
     
     q = QuizQuestion.query.get(q_id)
     if q:
+        QuizResponse.query.filter_by(question_id=q.id).delete()
         db.session.delete(q)
         db.session.commit()
         broadcast_questions(session_id)
@@ -334,11 +343,16 @@ def on_submit_quiz_response(data):
 
     # Grading logic
     is_correct = False
+    if q.session_id != session_id:
+        return
+
     if q.q_type == 'long':
         is_correct = bool(response_text and response_text.strip())
-    elif q.q_type in ['choice', 'short']:
+    elif q.q_type == 'choice':
+        is_correct = _choice_answer_values(q, response_text) == _choice_answer_values(q, q.correct_answer)
+    elif q.q_type == 'short':
         if q.correct_answer:
-            is_correct = (str(response_text).strip().lower() == str(q.correct_answer).strip().lower())
+            is_correct = (_normalize_answer(response_text) == _normalize_answer(q.correct_answer))
 
     try:
         # Check for existing response by this client for this question

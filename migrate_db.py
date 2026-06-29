@@ -2,8 +2,26 @@ import sqlite3
 import shutil
 import os
 import datetime
+from urllib.parse import unquote
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance', 'app.db')
+from app.config import Config
+
+
+def get_sqlite_db_path():
+    uri = Config.SQLALCHEMY_DATABASE_URI
+    if not uri.startswith('sqlite:///'):
+        raise RuntimeError(
+            "migrate_db.py only supports SQLite databases. "
+            f"Current SQLALCHEMY_DATABASE_URI is: {uri}"
+        )
+
+    raw_path = unquote(uri[len('sqlite:///'):])
+    if raw_path.startswith('/') and len(raw_path) > 2 and raw_path[2] == ':':
+        raw_path = raw_path[1:]
+    return os.path.abspath(raw_path)
+
+
+DB_PATH = get_sqlite_db_path()
 
 def backup_db():
     if not os.path.exists(DB_PATH):

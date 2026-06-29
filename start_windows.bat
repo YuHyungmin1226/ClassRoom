@@ -34,13 +34,34 @@ if not exist "%PYTHON_EXE%" (
     del "%PYTHON_DIR%\get-pip.py"
 )
 
-:: 2. Install/Update Dependencies (only when requirements.txt changes)
+:: 2. Install/Update Dependencies
 echo [*] Checking dependencies...
 set MARKER=%PYTHON_DIR%\.requirements.sha256
+set NEED_INSTALL=0
 "%PYTHON_EXE%" -c "import hashlib,os,sys; h=hashlib.sha256(open('requirements.txt','rb').read()).hexdigest(); m=open(r'%MARKER%').read().strip() if os.path.exists(r'%MARKER%') else ''; sys.exit(0 if h==m else 1)"
 if errorlevel 1 (
+    set NEED_INSTALL=1
+)
+
+"%PYTHON_EXE%" -c "import flask, flask_socketio, flask_sqlalchemy, flask_wtf, PIL, openpyxl, simple_websocket, werkzeug" >nul 2>&1
+if errorlevel 1 (
+    set NEED_INSTALL=1
+)
+
+if "!NEED_INSTALL!"=="1" (
     echo [*] Installing/updating packages...
     "%PYTHON_EXE%" -m pip install -r requirements.txt --quiet --no-warn-script-location
+    if errorlevel 1 (
+        echo [!] Dependency installation failed.
+        pause
+        exit /b 1
+    )
+    "%PYTHON_EXE%" -c "import flask, flask_socketio, flask_sqlalchemy, flask_wtf, PIL, openpyxl, simple_websocket, werkzeug" >nul 2>&1
+    if errorlevel 1 (
+        echo [!] Dependencies were installed, but required modules still cannot be imported.
+        pause
+        exit /b 1
+    )
     "%PYTHON_EXE%" -c "import hashlib; open(r'%MARKER%','w').write(hashlib.sha256(open('requirements.txt','rb').read()).hexdigest())"
 ) else (
     echo [*] Dependencies are up to date, skipping install.

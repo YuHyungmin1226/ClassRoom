@@ -259,6 +259,11 @@ def export_markdown():
                     
                     if f.file_path:
                         md_content += f"**Attached File:** {f.file_path}\n"
+                        attachment_name = os.path.basename(f.file_path)
+                        attachment_path = os.path.join(Config.UPLOAD_FOLDER, attachment_name)
+                        if os.path.isfile(attachment_path):
+                            attachment_zip_path = os.path.join(class_folder, session_folder, 'attachments', attachment_name)
+                            zf.write(attachment_path, attachment_zip_path)
                     
                     # Add to zip
                     zf.writestr(filepath, md_content)
@@ -382,6 +387,7 @@ def import_quiz_excel(session_id):
     try:
         wb = load_workbook(file)
         ws = wb.active
+        imported_questions = []
 
         # 기존 문제를 새 파일로 "동기화"(교체)한다.
         # 교체될 문제에 달린 응답이 고아로 남지 않도록 먼저 삭제한다.
@@ -393,15 +399,29 @@ def import_quiz_excel(session_id):
             if not row or len(row) < 3 or not row[2]:
                 continue  # Skip if no question text
 
+            q_type = str(row[1]).strip().lower() if row[1] else 'choice'
+            if q_type not in {'choice', 'short', 'long'}:
+                raise ValueError(f"Invalid question type: {q_type}")
+
+            options = str(row[3]) if len(row) > 3 and row[3] else ""
+            correct_answer = str(row[4]) if len(row) > 4 and row[4] else ""
+            if q_type == 'choice' and len([opt for opt in options.split('|') if opt.strip()]) < 2:
+                raise ValueError(f"Choice question requires at least two options: {row[2]}")
+            if q_type in {'choice', 'short'} and not correct_answer:
+                raise ValueError(f"{q_type} question requires a correct answer: {row[2]}")
+
             new_q = QuizQuestion(
                 session_id=session_id,
                 index=row[0] if row[0] is not None else 0,
-                q_type=row[1] if row[1] else 'choice',
+                q_type=q_type,
                 question=str(row[2]),
-                options=str(row[3]) if len(row) > 3 and row[3] else "",
-                correct_answer=str(row[4]) if len(row) > 4 and row[4] else ""
+                options=options,
+                correct_answer=correct_answer
             )
-            db.session.add(new_q)
+            imported_questions.append(new_q)
+
+        for q in imported_questions:
+            db.session.add(q)
 
         db.session.commit()
         return jsonify({'success': True})
@@ -429,7 +449,7 @@ def upload_file():
         thumbnail_path = None
         if filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'gif'}:
             try:
-                # with 블록으로 파일 핸들 누수 방지 (eventlet 다중 요청 환경)
+                # with 블록으로 파일 핸들 누수 방지
                 with Image.open(filepath) as img:
                     img.thumbnail((150, 150))
                     thumb_filename = f"thumb_{unique_filename}"

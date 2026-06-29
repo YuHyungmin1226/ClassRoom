@@ -38,15 +38,38 @@ fi
 VENV_PYTHON="./$VENV_DIR/bin/python3"
 VENV_PIP="./$VENV_DIR/bin/pip"
 
-# Install requirements only when requirements.txt changes
+# Install requirements when requirements.txt changes or required modules are missing
 echo "🔄 Checking dependencies..."
 MARKER="$VENV_DIR/.requirements.sha256"
 CURRENT_HASH=$($VENV_PYTHON -c "import hashlib; print(hashlib.sha256(open('requirements.txt','rb').read()).hexdigest())")
 SAVED_HASH=""
 [ -f "$MARKER" ] && SAVED_HASH=$(cat "$MARKER")
+NEED_INSTALL=0
 if [ "$CURRENT_HASH" != "$SAVED_HASH" ]; then
+    NEED_INSTALL=1
+fi
+
+$VENV_PYTHON -c "import flask, flask_socketio, flask_sqlalchemy, flask_wtf, PIL, openpyxl, simple_websocket, werkzeug" >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+    NEED_INSTALL=1
+fi
+
+if [ "$NEED_INSTALL" = "1" ]; then
     echo "📦 Installing/updating dependencies..."
-    $VENV_PIP install -r requirements.txt > /dev/null 2>&1
+    $VENV_PIP install -r requirements.txt
+    if [ $? -ne 0 ]; then
+        echo "❌ Dependency installation failed."
+        echo "Press any key to exit..."
+        read -n 1 -s
+        exit 1
+    fi
+    $VENV_PYTHON -c "import flask, flask_socketio, flask_sqlalchemy, flask_wtf, PIL, openpyxl, simple_websocket, werkzeug" >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo "❌ Dependencies were installed, but required modules still cannot be imported."
+        echo "Press any key to exit..."
+        read -n 1 -s
+        exit 1
+    fi
     echo "$CURRENT_HASH" > "$MARKER"
 else
     echo "✅ Dependencies are up to date."

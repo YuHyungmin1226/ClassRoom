@@ -5,7 +5,8 @@ from flask_wtf.csrf import CSRFProtect
 from .config import Config
 
 db = SQLAlchemy()
-socketio = SocketIO(cors_allowed_origins=Config.ALLOWED_ORIGINS or "*")
+socketio = SocketIO(async_mode='threading',
+                    cors_allowed_origins=Config.ALLOWED_ORIGINS or "*")
 csrf = CSRFProtect()
 
 def create_app():
@@ -41,11 +42,8 @@ def create_app():
             db.session.add(default_admin)
             db.session.commit()
             if generated:
-                print("=" * 60)
-                print("[보안] 초기 관리자 비밀번호가 생성되었습니다:")
-                print(f"        {initial_password}")
-                print("        최초 로그인 후 즉시 변경하세요. (환경변수 ADMIN_PASSWORD로 지정 가능)")
-                print("=" * 60)
+                print(f"[보안] 초기 관리자 비밀번호: {initial_password}")
+                print("       최초 로그인 후 즉시 변경하세요. (환경변수 ADMIN_PASSWORD로 지정 가능)")
 
         from .routes import main
         app.register_blueprint(main)
