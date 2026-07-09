@@ -32,7 +32,7 @@ function promptClassName() {
             {% for c in active_classes %}
                 <div class="card session-card" style="box-shadow: 0 2px 4px rgba(0,0,0,0.1); border: 1px solid #e2e8f0;">
                     <h4 style="margin-top: 0; margin-bottom: 10px;">{{ c.name }}</h4>
-                    <p style="font-size: 0.85em; color: #64748b; margin-bottom: 15px;">Created: {{ c.created_at.strftime('%Y-%m-%d') }}</p>
+                    <p style="font-size: 0.85em; color: #64748b; margin-bottom: 15px;">Created: {{ c.created_at.strftime('%Y-%m-%d') if c.created_at else 'N/A' }}</p>
                     <div style="display: flex; gap: 10px; align-items: stretch;">
                         <a href="{{ url_for('main.admin_class', class_id=c.id) }}" class="btn btn-primary btn-sm" style="flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; margin: 0;">Enter Class</a>
                         <form method="POST" action="{{ url_for('main.close_class', class_id=c.id) }}" style="margin: 0; display: flex;">
@@ -54,8 +54,8 @@ function promptClassName() {
             <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; margin-top: 15px;">
             {% for c in past_classes %}
                 <div class="card session-card" style="box-shadow: 0 2px 4px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; background-color: #f8fafc;">
-                    <h4 style="margin-top: 0; margin-bottom: 10px; color: #64748b;">{{ c.name }} <span style="font-size: 0.8em; color: #ef4444;">(Closed)</span></h4>
-                    <p style="font-size: 0.85em; color: #94a3b8; margin-bottom: 15px;">Created: {{ c.created_at.strftime('%Y-%m-%d') }}</p>
+                    <h4 style="margin-top: 0; margin-bottom: 10px; color: #64748b;">{{ c.name }} <span style="font-size: 0.8em; color: #b91c1c;">(Closed)</span></h4>
+                    <p style="font-size: 0.85em; color: #64748b; margin-bottom: 15px;">Created: {{ c.created_at.strftime('%Y-%m-%d') if c.created_at else 'N/A' }}</p>
                     <div style="display: flex; gap: 10px; align-items: stretch;">
                         <a href="{{ url_for('main.admin_class', class_id=c.id) }}" class="btn btn-secondary btn-sm" style="flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; margin: 0;">View</a>
                         <form method="POST" action="{{ url_for('main.delete_class', class_id=c.id) }}" style="margin: 0; display: flex;" onsubmit="return confirm('클래스와 포함된 모든 세션 및 작성된 노드가 영구 삭제됩니다. 정말 삭제하시겠습니까?');">

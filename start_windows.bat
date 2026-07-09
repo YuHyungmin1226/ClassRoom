@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+cd /d "%~dp0"
 
 echo ========================================
 echo       ClassMap Server Launcher (Win)
@@ -11,7 +12,7 @@ set PIP_EXE=%PYTHON_DIR%\Scripts\pip.exe
 
 :: 1. Check for Portable Python
 if not exist "%PYTHON_EXE%" (
-    echo [!] Portable Python not found. Setting up environment...
+    echo [WARN] Portable Python not found. Setting up environment...
     
     if not exist "%PYTHON_DIR%" mkdir "%PYTHON_DIR%"
     
@@ -25,7 +26,7 @@ if not exist "%PYTHON_EXE%" (
     echo [*] Configuring Python paths...
     :: Enable site-packages in embeddable python
     if exist "%PYTHON_DIR%\python311._pth" (
-        powershell -Command "(Get-Content '%PYTHON_DIR%\python311._pth') -replace '#import site', 'import site' | Set-Content '%PYTHON_DIR%\python311._pth'"
+        powershell -Command "(Get-Content ($env:PYTHON_DIR + '\python311._pth')) -replace '#import site', 'import site' | Set-Content ($env:PYTHON_DIR + '\python311._pth')"
     )
     
     echo [*] Installing Pip...
@@ -38,7 +39,7 @@ if not exist "%PYTHON_EXE%" (
 echo [*] Checking dependencies...
 set MARKER=%PYTHON_DIR%\.requirements.sha256
 set NEED_INSTALL=0
-"%PYTHON_EXE%" -c "import hashlib,os,sys; h=hashlib.sha256(open('requirements.txt','rb').read()).hexdigest(); m=open(r'%MARKER%').read().strip() if os.path.exists(r'%MARKER%') else ''; sys.exit(0 if h==m else 1)"
+"%PYTHON_EXE%" -c "import hashlib,os,sys; h=hashlib.sha256(open('requirements.txt','rb').read()).hexdigest(); mp=os.environ['MARKER']; m=open(mp).read().strip() if os.path.exists(mp) else ''; sys.exit(0 if h==m else 1)"
 if errorlevel 1 (
     set NEED_INSTALL=1
 )
@@ -50,27 +51,27 @@ if errorlevel 1 (
 
 if "!NEED_INSTALL!"=="1" (
     echo [*] Installing/updating packages...
-    "%PYTHON_EXE%" -m pip install -r requirements.txt --quiet --no-warn-script-location
+    "%PYTHON_EXE%" -m pip install -r requirements.txt --no-warn-script-location
     if errorlevel 1 (
-        echo [!] Dependency installation failed.
+        echo [ERROR] Dependency installation failed.
         pause
         exit /b 1
     )
     "%PYTHON_EXE%" -c "import flask, flask_socketio, flask_sqlalchemy, flask_wtf, PIL, openpyxl, simple_websocket, werkzeug" >nul 2>&1
     if errorlevel 1 (
-        echo [!] Dependencies were installed, but required modules still cannot be imported.
+        echo [ERROR] Dependencies were installed, but required modules still cannot be imported.
         pause
         exit /b 1
     )
-    "%PYTHON_EXE%" -c "import hashlib; open(r'%MARKER%','w').write(hashlib.sha256(open('requirements.txt','rb').read()).hexdigest())"
+    "%PYTHON_EXE%" -c "import hashlib,os; open(os.environ['MARKER'],'w').write(hashlib.sha256(open('requirements.txt','rb').read()).hexdigest())"
 ) else (
     echo [*] Dependencies are up to date, skipping install.
 )
 
 :: 3. Cleanup Port 5555
 echo [*] Cleaning up port 5555...
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5555 ^| findstr LISTENING') do (
-    echo [!] Killing process %%a using port 5555...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr /C:":5555 " ^| findstr LISTENING') do (
+    echo [WARN] Killing process %%a using port 5555...
     taskkill /f /pid %%a >nul 2>&1
 )
 

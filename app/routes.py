@@ -16,6 +16,13 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 
 
 @main.route('/uploads/<filename>')
 def uploaded_file(filename):
+    # 마감된 세션의 첨부파일은 view_class/view_session과 동일하게 비관리자에게 비공개 처리
+    if not session.get('admin_logged_in'):
+        flag = Flag.query.filter(
+            (Flag.file_path == f"uploads/{filename}") | (Flag.thumbnail_path == f"uploads/{filename}")
+        ).first()
+        if flag and not flag.session.is_active:
+            return "This session is closed.", 403
     return send_from_directory(Config.UPLOAD_FOLDER, filename)
 
 def allowed_file(filename):
@@ -84,6 +91,11 @@ def close_class(class_id):
         return jsonify({'error': 'Unauthorized'}), 401
     c = ClassGroup.query.get_or_404(class_id)
     c.is_active = False
+    # 세션까지 함께 닫아야 한다 — 그렇지 않으면 클래스는 닫혔어도 자식 세션은 is_active=True로
+    # 남아, view_session/소켓 쓰기/첨부파일 다운로드가 여전히 세션의 is_active만 검사하므로
+    # 비관리자가 "닫힌" 클래스의 콘텐츠에 그대로 접근/쓰기할 수 있게 된다.
+    for s in c.sessions:
+        s.is_active = False
     db.session.commit()
     return redirect(url_for('main.admin_dashboard', type=c.class_type))
 
@@ -340,8 +352,7 @@ def export_quiz_excel(session_id):
         return redirect(url_for('main.admin_login'))
     
     from openpyxl import Workbook
-    from .models import QuizQuestion
-    
+
     s = Session.query.get_or_404(session_id)
     questions = QuizQuestion.query.filter_by(session_id=session_id).order_by(QuizQuestion.index).all()
     
@@ -419,6 +430,11 @@ def import_quiz_excel(session_id):
                 correct_answer=correct_answer
             )
             imported_questions.append(new_q)
+
+        # 유효한 문제가 하나도 없으면 기존 문제/응답을 지운 채로 커밋되지 않도록 중단한다
+        # (잘못된 시트/헤더로 업로드 시 전체 데이터가 조용히 삭제되는 것을 방지).
+        if not imported_questions:
+            raise ValueError('No valid questions found in file; import aborted.')
 
         for q in imported_questions:
             db.session.add(q)

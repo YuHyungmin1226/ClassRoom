@@ -1,12 +1,53 @@
+import os
 from flask_socketio import emit, join_room, leave_room
 from . import socketio, db
 from .models import Flag, QuizQuestion, QuizResponse, Session
+from .config import Config
 from flask import request, session
 
 
 def _admin_room(session_id):
     """관리자 전용 하위 룸 이름 — 학생 응답을 학생끼리 보지 못하도록 분리"""
     return f"{session_id}:admins"
+
+
+def _session_writable(session_id):
+    """세션이 존재하고, 활성 상태이거나 요청자가 관리자인 경우에만 쓰기 허용.
+    on_join과 동일한 기준 — 닫힌 세션에 대한 참여자의 add_flag/draw_data 등 우회 쓰기를 차단.
+    """
+    if not session_id:
+        return False
+    sess = Session.query.get(session_id)
+    return bool(sess) and (sess.is_active or session.get('admin_logged_in', False))
+
+
+def _validate_upload_path(rel_path):
+    """클라이언트가 보낸 file_path/thumbnail_path가 실제 업로드 폴더 안의 파일을 가리키는지 검증.
+    basename만 사용해 경로 조작(../)과 프로토콜 상대 URL(//evil.example/...) 주입을 차단한다 —
+    검증 없이 저장하면 target=_blank 첨부 링크가 외부 사이트를 여는 피싱 벡터가 된다.
+    """
+    if not rel_path:
+        return None
+    filename = os.path.basename(str(rel_path).replace('\\', '/'))
+    if not filename:
+        return None
+    abs_path = os.path.join(Config.UPLOAD_FOLDER, filename)
+    if os.path.isfile(abs_path):
+        return f"uploads/{filename}"
+    return None
+
+
+def _delete_upload_file(rel_path):
+    """업로드 폴더 내 파일을 안전하게 삭제 (routes.py의 delete_file_safe와 동일 로직)."""
+    if not rel_path:
+        return
+    filename = os.path.basename(str(rel_path).replace('\\', '/'))
+    abs_path = os.path.join(Config.UPLOAD_FOLDER, filename)
+    try:
+        if os.path.isfile(abs_path):
+            os.remove(abs_path)
+    except Exception as e:
+        print(f"Failed to delete orphaned file {abs_path}: {e}")
 
 
 def _serialize_question(q, include_answer):
@@ -116,7 +157,9 @@ def on_join(data):
         emit('load_all_responses', r_data, to=request.sid)
     else:
         # 학생에게는 본인 응답만 복원 (새로고침 시 답안/채점 상태 유지)
-        pid = _current_participant_id() or data.get('client_id')
+        # 서명된 participant_id가 없는 소켓은 client_id를 신뢰하지 않는다 —
+        # 브로드캐스트로 노출된 남의 client_id를 도용해 타인의 채점 결과를 열람할 수 있으므로 폴백하지 않는다.
+        pid = _current_participant_id()
         if pid:
             my = QuizResponse.query.filter_by(session_id=room, client_id=pid).all()
             my_data = [{
@@ -128,26 +171,35 @@ def on_join(data):
 
 @socketio.on('leave')
 def on_leave(data):
-    room = data['session_id']
+    room = data.get('session_id')
+    if not room:
+        return
     leave_room(room)
 
 @socketio.on('add_flag')
 def on_add_flag(data):
     session_id = data.get('session_id')
+    if not _session_writable(session_id):
+        return
     region_id = data.get('region_id')
     x = data.get('x')
     y = data.get('y')
     text_content = data.get('text_content')
-    file_path = data.get('file_path')
-    thumbnail_path = data.get('thumbnail_path')
+    file_path = _validate_upload_path(data.get('file_path'))
+    thumbnail_path = _validate_upload_path(data.get('thumbnail_path'))
     author_name = data.get('author_name', 'Participant')
+    is_admin = session.get('admin_logged_in', False)
+    # 서명된 participant_id가 없는 소켓(참여자용 HTTP 세션 페이지를 거치지 않은 클라이언트)은
+    # 클라이언트가 보낸 client_id를 신뢰할 수 없으므로 쓰기를 거부한다 — 그 값은 다른 참여자의
+    # 실제 client_id를 도용해 위조할 수 있다 (브로드캐스트에 client_id가 그대로 노출되므로).
+    if not is_admin and not _current_participant_id():
+        return
     # 소유자 식별은 서버가 신뢰하는 participant_id 사용 (클라이언트 위조 방지).
-    # 세션 값이 없을 때만(예외적) 클라이언트 값으로 폴백.
+    # 세션 값이 없을 때만(예외적, 관리자 한정) 클라이언트 값으로 폴백.
     client_id = _current_participant_id() or data.get('client_id')
     post_type = data.get('post_type', 'normal')
 
     # Permission check: Only admin can create notice or objective
-    is_admin = session.get('admin_logged_in', False)
     if not is_admin and post_type in ['notice', 'objective']:
         post_type = 'normal'
 
@@ -174,12 +226,18 @@ def on_add_flag(data):
 @socketio.on('edit_flag')
 def on_edit_flag(data):
     session_id = data.get('session_id')
+    if not _session_writable(session_id):
+        return
     flag_id = data.get('flag_id')
-    
+
     flag = Flag.query.get(flag_id)
     if flag:
         # Authorization check: Admin or the person who created the flag
         is_admin = session.get('admin_logged_in', False)
+        # 서명된 participant_id가 없는 소켓은 client_id를 신뢰하지 않는다 —
+        # 그렇지 않으면 브로드캐스트로 노출된 남의 client_id를 도용해 소유권 검증을 통과할 수 있다.
+        if not is_admin and not _current_participant_id():
+            return
         requester_client_id = _current_participant_id() or data.get('client_id')
 
         # Permission check:
@@ -199,11 +257,17 @@ def on_edit_flag(data):
         flag.text_content = data.get('text_content', flag.text_content)
         flag.post_type = data.get('post_type', flag.post_type)
         
-        # If new file is uploaded, update paths
+        # If new file is uploaded, update paths — 교체 전 기존 파일을 삭제해 디스크 누수를 방지
         if 'file_path' in data:
-            flag.file_path = data.get('file_path')
-            flag.thumbnail_path = data.get('thumbnail_path')
-            
+            old_file_path = flag.file_path
+            old_thumbnail_path = flag.thumbnail_path
+            flag.file_path = _validate_upload_path(data.get('file_path'))
+            flag.thumbnail_path = _validate_upload_path(data.get('thumbnail_path'))
+            if old_file_path and old_file_path != flag.file_path:
+                _delete_upload_file(old_file_path)
+            if old_thumbnail_path and old_thumbnail_path != flag.thumbnail_path:
+                _delete_upload_file(old_thumbnail_path)
+
         db.session.commit()
         
         flag_data = _serialize_flag(flag)
@@ -213,8 +277,10 @@ def on_edit_flag(data):
 @socketio.on('delete_flag')
 def on_delete_flag(data):
     session_id = data.get('session_id')
+    if not _session_writable(session_id):
+        return
     flag_id = data.get('flag_id')
-    
+
     try:
         flag = Flag.query.get(int(flag_id))
     except (TypeError, ValueError):
@@ -227,6 +293,9 @@ def on_delete_flag(data):
         # 1. If it's a notice or objective, ONLY admin can delete.
         # 2. Otherwise, admin OR the owner can delete.
         is_admin = session.get('admin_logged_in', False)
+        # 서명된 participant_id가 없는 소켓은 client_id를 신뢰하지 않는다 (도용 방지).
+        if not is_admin and not _current_participant_id():
+            return
         requester_client_id = _current_participant_id() or data.get('client_id')
 
         is_special_type = flag.post_type in ['notice', 'objective']
@@ -248,6 +317,8 @@ def on_delete_flag(data):
 @socketio.on('draw_data')
 def on_draw_data(data):
     session_id = data.get('session_id')
+    if not _session_writable(session_id):
+        return
     # Broadcast drawing data to everyone else in the room
     emit('draw_data', data, to=session_id, include_self=False)
 
@@ -330,9 +401,15 @@ def on_delete_quiz_question(data):
 @socketio.on('submit_quiz_response')
 def on_submit_quiz_response(data):
     session_id = data.get('session_id')
+    if not _session_writable(session_id):
+        return
     q_id = data.get('question_id')
+    # 서명된 participant_id가 없는 소켓은 거부 — 없으면 남의 client_id를 도용해
+    # 이미 채점된 응답을 덮어쓸 수 있다 (아래 upsert가 client_id로만 소유자를 구분하므로).
+    if not _current_participant_id():
+        return
     # 소유자 식별은 서버 신뢰 값 사용
-    client_id = _current_participant_id() or data.get('client_id')
+    client_id = _current_participant_id()
     response_text = data.get('response')
     author_name = data.get('author_name', 'Participant')
 
@@ -349,7 +426,10 @@ def on_submit_quiz_response(data):
     if q.q_type == 'long':
         is_correct = bool(response_text and response_text.strip())
     elif q.q_type == 'choice':
-        is_correct = _choice_answer_values(q, response_text) == _choice_answer_values(q, q.correct_answer)
+        # correct_answer가 비어있으면(문제 설정 미비) 무조건 오답 처리 —
+        # 가드가 없으면 양쪽 다 빈 리스트로 평가되어 아무 응답이나 정답으로 채점된다.
+        if q.correct_answer:
+            is_correct = _choice_answer_values(q, response_text) == _choice_answer_values(q, q.correct_answer)
     elif q.q_type == 'short':
         if q.correct_answer:
             is_correct = (_normalize_answer(response_text) == _normalize_answer(q.correct_answer))
@@ -384,7 +464,14 @@ def on_submit_quiz_response(data):
         resp.response = response_text
         resp.is_correct = is_correct
         resp.author_name = author_name
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as e2:
+            # 재시도 commit마저 실패하면(지속적인 쓰기 경합 등) 예외가 소켓 핸들러 밖으로
+            # 전파되지 않도록 롤백 후 조용히 반환한다.
+            db.session.rollback()
+            print(f"Failed to save quiz response (retry): {e2}")
+            return
 
     resp_data = {
         'id': resp.id,
@@ -422,7 +509,7 @@ def broadcast_questions(session_id):
     # 학생 룸에는 정답 제거 버전 전송
     student_data = [_serialize_question(q, include_answer=False) for q in questions]
     emit('quiz_update', student_data, to=session_id)
-    # 변경을 일으킨 관리자에게는 정답 포함 버전을 별도 전송 (관리 화면 갱신용)
-    if session.get('admin_logged_in'):
-        admin_data = [_serialize_question(q, include_answer=True) for q in questions]
-        emit('quiz_update', admin_data, to=request.sid)
+    # 정답 포함 버전은 관리자 룸 전체에 별도 전송 (관리 화면 갱신용) —
+    # to=request.sid로 보내면 변경을 일으킨 관리자만 갱신되고 다른 관리자 탭은 정답이 '-'로 남는다.
+    admin_data = [_serialize_question(q, include_answer=True) for q in questions]
+    emit('quiz_update', admin_data, to=_admin_room(session_id))

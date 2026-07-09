@@ -49,4 +49,10 @@ def create_app():
         app.register_blueprint(main)
         from . import events
 
+    @app.after_request
+    def set_security_headers(response):
+        # MIME 스니핑으로 업로드 파일을 다른 콘텐츠 타입으로 오인 실행하는 것을 방지
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        return response
+
     return app

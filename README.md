@@ -51,7 +51,7 @@ On first startup, the app creates an admin account. If `ADMIN_PASSWORD` is set i
 
 ## Maintenance
 
-For existing SQLite databases from older versions, run:
+For existing SQLite databases from older versions, stop the running server first, then run:
 
 ```bash
 python migrate_db.py

@@ -4,7 +4,7 @@
 <div class="page-header">
     <h1 class="header-title">Admin Settings</h1>
     <div class="header-actions">
-        <a href="{{ url_for('main.admin_dashboard') }}" class="btn btn-secondary btn-sm">← Back</a>
+        <a href="{{ url_for('main.admin_classroom') }}" class="btn btn-secondary btn-sm">← Back</a>
     </div>
 </div>
 
@@ -17,14 +17,14 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-group" style="margin-bottom: 25px;">
                 <label for="current_password" style="display: block; margin-bottom: 8px; font-weight: 500; color: #475569;">Current Password</label>
-                <input type="password" id="current_password" name="current_password" class="form-control" placeholder="Enter current password" style="width: 100%; box-sizing: border-box;" required>
+                <input type="password" id="current_password" name="current_password" class="form-control" placeholder="Enter current password" style="width: 100%; box-sizing: border-box;" autocomplete="current-password" required>
             </div>
             <div class="form-group" style="margin-bottom: 25px;">
                 <label for="new_password" style="display: block; margin-bottom: 8px; font-weight: 500; color: #475569;">New Password</label>
-                <input type="password" id="new_password" name="new_password" class="form-control" placeholder="Enter a strong new password" style="width: 100%; box-sizing: border-box;" required>
+                <input type="password" id="new_password" name="new_password" class="form-control" placeholder="Enter a strong new password" style="width: 100%; box-sizing: border-box;" autocomplete="new-password" required>
             </div>
             <div style="display: flex; justify-content: flex-end; gap: 12px; align-items: stretch;">
-                <a href="{{ url_for('main.admin_dashboard') }}" class="btn btn-secondary" style="text-decoration: none; display: flex; align-items: center; justify-content: center; margin: 0;">Cancel</a>
+                <a href="{{ url_for('main.admin_classroom') }}" class="btn btn-secondary" style="text-decoration: none; display: flex; align-items: center; justify-content: center; margin: 0;">Cancel</a>
                 <button type="submit" class="btn btn-primary" style="display: flex; align-items: center; justify-content: center; margin: 0;">Update Password</button>
             </div>
         </form>

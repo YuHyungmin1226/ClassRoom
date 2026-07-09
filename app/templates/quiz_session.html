@@ -511,6 +511,8 @@
     let responseStates = {}; // question_id -> { is_correct: bool }
     let currentQuestionIdx = 0;
     let isCompleted = false;
+    let isRetryMode = false; // "Retry Wrong" 진행 중 여부 (isCompleted와 별개로 추적)
+    let retryQuestionIds = []; // 재시도 대상 문제 id 목록 (최신 allQuestions에서 다시 필터링하기 위함)
 
     // --- Tab Switching ---
     function switchTab(tab, event) {
@@ -714,7 +716,9 @@
         let qText = q.question;
         let options = [];
         if (q.options) {
-            options = q.options.split('|').map(p => p.trim()).filter(p => p);
+            // 서버(_choice_answer_values)/관리자 decodeAnswer와 동일하게 빈 항목을 제거하지 않음
+            // (필터링하면 옵션 번호가 서버 채점 기준과 어긋나 정답이 오답 처리될 수 있음)
+            options = q.options.split('|').map(p => p.trim());
         }
 
         // 복수정답 여부: 학생에게는 정답이 숨겨지므로 서버가 보낸 is_multi를 사용.
@@ -794,8 +798,22 @@
 
     function finishQuiz() {
         isCompleted = true;
+        renderFinishSummary();
+        document.getElementById('quiz-status').classList.add('hidden');
+        document.getElementById('prevBtn').style.display = 'none';
+        document.getElementById('nextBtn').style.display = 'none';
+    }
+
+    // finishQuiz()가 처음 완료 화면을 그릴 때와, 완료 후 뒤늦게 도착하는 채점 결과(my_response_update)에
+    // 반응해 요약을 다시 그릴 때 모두 사용됨 — 최종 점수가 stale한 값으로 굳지 않도록 함
+    function renderFinishSummary() {
         const container = document.getElementById('active-question-container');
-        
+
+        if (questions.length === 0) {
+            container.innerHTML = '<div class="empty-state card"><p>No questions available.</p></div>';
+            return;
+        }
+
         let correctCount = 0;
         questions.forEach(q => {
             if (responseStates[q.id] && responseStates[q.id].is_correct) correctCount++;
@@ -820,20 +838,22 @@
             </div>
         `;
         container.innerHTML = html;
-        document.getElementById('quiz-status').classList.add('hidden');
-        document.getElementById('prevBtn').style.display = 'none';
-        document.getElementById('nextBtn').style.display = 'none';
     }
 
     function retryWrong() {
         const wrongOnes = questions.filter(q => !responseStates[q.id] || !responseStates[q.id].is_correct);
         if (wrongOnes.length === 0) return resetQuiz();
-        
+
+        // id 목록으로 재시도 대상을 기억해 두어, 도중에 quiz_update가 와도
+        // 최신 allQuestions에서 같은 문제만 다시 걸러낼 수 있게 함
+        isRetryMode = true;
+        retryQuestionIds = wrongOnes.map(q => q.id);
         questions = [...wrongOnes];
         startQuizSession();
     }
 
     function resetQuiz() {
+        isRetryMode = false;
         questions = [...allQuestions];
         startQuizSession();
     }
@@ -861,14 +881,26 @@
         // Handle multi-select toggle
         let current = myResponses[qId] || "";
         let selected = current ? current.split(',').filter(v => v) : [];
-        
+
         if (selected.includes(val)) {
             selected = selected.filter(v => v !== val);
         } else {
             selected.push(val);
         }
-        
-        myResponses[qId] = selected.sort().join(',');
+
+        const joined = selected.sort().join(',');
+        myResponses[qId] = joined;
+
+        // 단일 선택처럼 토글 즉시 서버에 저장 — 별도 제출 버튼을 누르지 않고 이동해도 유실되지 않도록 함
+        const nickname = document.getElementById('nickname').value || 'Participant';
+        socket.emit('submit_quiz_response', {
+            session_id: sessionId,
+            question_id: qId,
+            client_id: clientId,
+            author_name: nickname,
+            response: joined
+        });
+
         renderCurrentQuestion();
     }
 
@@ -902,18 +934,42 @@
         socket.emit('join', { session_id: sessionId, client_id: clientId });
     });
 
-    socket.on('load_quiz_questions', (data) => {
-        allQuestions = data.sort((a, b) => a.index - b.index);
-        if (!isCompleted) {
+    // allQuestions가 갱신될 때마다 활성 questions 목록을 재계산.
+    // 재시도 모드면 최신 목록에서 재시도 대상 id만 다시 골라내고(완전삭제 시 전체로 폴백),
+    // 문제 삭제로 목록이 짧아졌을 때 currentQuestionIdx가 범위를 벗어나지 않도록 보정한다.
+    function applyQuestionsUpdate() {
+        if (isCompleted) return;
+        if (isRetryMode) {
+            questions = allQuestions.filter(q => retryQuestionIds.includes(q.id));
+            if (questions.length === 0) {
+                isRetryMode = false;
+                questions = [...allQuestions];
+            }
+        } else {
             questions = [...allQuestions];
         }
+        if (currentQuestionIdx > questions.length - 1) {
+            currentQuestionIdx = Math.max(0, questions.length - 1);
+        }
+    }
+
+    // 완료 화면 표시 후 도착하는 갱신(재접속 재동기화, 문항 변경 브로드캐스트, 뒤늦은 채점 결과)이
+    // renderCurrentQuestion()으로 요약 화면을 덮어쓰지 않도록 참여자 쪽 렌더링을 한 곳에 모은다.
+    function renderParticipantView() {
+        if (isCompleted) renderFinishSummary();
+        else renderCurrentQuestion();
+    }
+
+    socket.on('load_quiz_questions', (data) => {
+        allQuestions = data.sort((a, b) => a.index - b.index);
+        applyQuestionsUpdate();
         if (isAdmin) {
             updateAdminTable();
             // Set next index
             const nextIdx = allQuestions.length > 0 ? Math.max(...allQuestions.map(q => q.index)) + 1 : 1;
             document.getElementById('q_index').value = nextIdx;
         } else {
-            renderCurrentQuestion();
+            renderParticipantView();
         }
     });
 
@@ -922,23 +978,31 @@
             myResponses[r.question_id] = r.response;
             responseStates[r.question_id] = { is_correct: r.is_correct };
         });
-        if (!isAdmin) renderCurrentQuestion();
+        if (!isAdmin) renderParticipantView();
     });
 
     socket.on('my_response_update', (data) => {
         myResponses[data.question_id] = data.response;
         responseStates[data.question_id] = { is_correct: data.is_correct };
-        if (!isAdmin && !isCompleted) renderCurrentQuestion();
+        if (!isAdmin) renderParticipantView();
     });
 
     socket.on('quiz_update', (data) => {
         // Full refresh of questions
         allQuestions = data.sort((a, b) => a.index - b.index);
-        if (!isCompleted) {
-            questions = [...allQuestions];
+        applyQuestionsUpdate();
+        if (isAdmin) {
+            updateAdminTable();
+            // 삭제된 문항의 응답이 통계/목록에 계속 남지 않도록 캐시를 최신 문항 기준으로 정리
+            if (window.allResponses) {
+                const validIds = new Set(allQuestions.map(q => q.id));
+                window.allResponses = window.allResponses.filter(r => validIds.has(r.question_id));
+            }
+            updateStats();
+            renderResponses();
+        } else {
+            renderParticipantView();
         }
-        if (isAdmin) updateAdminTable();
-        else renderCurrentQuestion();
     });
 
     socket.on('new_response', (data) => {

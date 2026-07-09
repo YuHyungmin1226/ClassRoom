@@ -54,6 +54,8 @@ def index_exists(cursor, index_name):
     return cursor.fetchone() is not None
 
 def migrate():
+    print("[!] 계속하기 전에 실행 중인 서버(run.py)를 반드시 종료하세요.")
+    print("    서버가 DB 파일을 열어둔 상태로 백업/마이그레이션을 진행하면 데이터가 손상될 수 있습니다.\n")
     if not backup_db():
         return
         

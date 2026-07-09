@@ -59,16 +59,51 @@
         font-weight: 600;
     }
 
-    .student-row {
-        display: grid;
-        grid-template-columns: 1fr 2fr 100px;
-        gap: 15px;
-        padding: 10px;
+    .correct-rate { color: #6366f1; font-weight: 800; }
+
+    /* renderSessionResults()가 생성하는 표/진행바 마크업용 스타일.
+       quiz_session.html에 동일한 이름의 .progress-bar/.progress-bar-container가 있으나
+       margin-bottom 등 세부 값은 이 페이지 레이아웃에 맞게 다르게 조정되어 있다(완전 동일하지 않음).
+       .loading-state는 이 페이지 전용 스타일로 quiz_session.html에는 대응 클래스가 없다. */
+    .loading-state {
+        padding: 20px;
+        text-align: center;
+        color: #64748b;
+    }
+
+    .progress-bar-container {
+        width: 100%;
+        height: 10px;
+        background: #e2e8f0;
+        border-radius: 5px;
+        overflow: hidden;
+    }
+
+    .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #6366f1, #a855f7);
+        width: 0%;
+        transition: width 0.5s ease;
+    }
+
+    .admin-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 15px;
+    }
+
+    .admin-table th, .admin-table td {
+        padding: 12px;
+        text-align: left;
         border-bottom: 1px solid #f1f5f9;
     }
 
-    .student-name { font-weight: 700; color: #1e293b; }
-    .correct-rate { color: #6366f1; font-weight: 800; }
+    .admin-table th {
+        font-weight: 700;
+        color: #475569;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+    }
 </style>
 {% endblock %}
 
