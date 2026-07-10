@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, flash, send_from_directory, send_file
+from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, flash, send_from_directory, send_file, abort
 from werkzeug.utils import secure_filename
 from PIL import Image
 import os
@@ -13,6 +13,35 @@ from .config import Config
 main = Blueprint('main', __name__)
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'webm', 'mov'}
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+GAME_LIBRARY = {
+    'dialike': {
+        'id': 'dialike',
+        'name': 'DIALIKE',
+        'subtitle': 'Dark Action RPG',
+        'description': '디아블로 스타일 전투, 파밍, 장비 성장을 담은 웹 액션 RPG',
+        'folder': os.path.join(PROJECT_ROOT, 'dialike'),
+        'entry': 'index.html',
+    },
+}
+
+
+def _available_games():
+    games = []
+    for game in GAME_LIBRARY.values():
+        item = dict(game)
+        item['available'] = os.path.isfile(os.path.join(game['folder'], game['entry']))
+        item['play_url'] = url_for('main.classgame_files', game_id=game['id'])
+        games.append(item)
+    return games
+
+
+def _get_game_or_404(game_id):
+    game = GAME_LIBRARY.get(game_id)
+    if not game or not os.path.isfile(os.path.join(game['folder'], game['entry'])):
+        abort(404)
+    return game
 
 @main.route('/uploads/<filename>')
 def uploaded_file(filename):
@@ -299,6 +328,17 @@ def export_markdown():
 def index():
     # Integrated portal for everyone
     return render_template('classroom_select.html', is_admin=session.get('admin_logged_in', False))
+
+@main.route('/classgame')
+def classgame():
+    return render_template('class_game.html', games=_available_games())
+
+@main.route('/classgame/<game_id>/files/')
+@main.route('/classgame/<game_id>/files/<path:filename>')
+def classgame_files(game_id, filename=None):
+    game = _get_game_or_404(game_id)
+    filename = filename or game['entry']
+    return send_from_directory(game['folder'], filename)
 
 @main.route('/admin/classroom')
 def admin_classroom():

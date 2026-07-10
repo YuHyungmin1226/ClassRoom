@@ -1,11 +1,12 @@
 # Classroom Collaboration Platform
 
-Classroom Portal is a real-time classroom collaboration platform for teachers and students on the same local network. It supports four activity modes:
+Classroom Portal is a real-time classroom collaboration platform for teachers and students on the same local network. It supports five activity modes:
 
 - **ClassMap**: place pins, notes, media, and YouTube embeds on a shared map
 - **ClassWrite**: collect structured posts, notices, and learning objectives in a live feed
 - **ClassDraw**: draw together on a shared real-time canvas
 - **ClassQuiz**: create quizzes, collect student answers, and view live results
+- **ClassGame**: launch classroom games in a full-screen browser view, starting with the `dialike` web RPG
 
 ## Key Features
 

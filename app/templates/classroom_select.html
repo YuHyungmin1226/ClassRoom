@@ -65,11 +65,28 @@
             <p>문제를 풀고 실시간으로<br>학습 결과를 확인하는 퀴즈 클래스</p>
             <div class="select-badge">입장하기</div>
         </div>
+
+        <!-- ClassGame Option -->
+        <div class="selection-card" onclick="goToClassGame()">
+            <div class="card-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 12H10" />
+                    <path d="M8 10V14" />
+                    <path d="M15 13H15.01" />
+                    <path d="M18 11H18.01" />
+                    <path d="M6.5 8H17.5C19.9853 8 22 10.0147 22 12.5V14.5C22 16.433 20.433 18 18.5 18C17.409 18 16.379 17.489 15.72 16.62L15 15.67H9L8.28 16.62C7.621 17.489 6.591 18 5.5 18C3.567 18 2 16.433 2 14.5V12.5C2 10.0147 4.01472 8 6.5 8Z" />
+                </svg>
+            </div>
+            <h3>ClassGame</h3>
+            <p>수업에서 바로 실행할 수 있는<br>게임 라이브러리</p>
+            <div class="select-badge">게임 선택</div>
+        </div>
     </div>
     <div id="selection-config" 
          data-is-admin="{{ 'true' if is_admin else 'false' }}" 
          data-admin-url="{{ url_for('main.admin_dashboard') }}" 
-         data-classes-url="{{ url_for('main.classes') }}">
+         data-classes-url="{{ url_for('main.classes') }}"
+         data-classgame-url="{{ url_for('main.classgame') }}">
     </div>
 </div>
 
@@ -180,6 +197,11 @@ function goToDashboard(type) {
         url = config.classesUrl + "?type=" + type;
     }
     location.href = url;
+}
+
+function goToClassGame() {
+    const config = document.getElementById('selection-config').dataset;
+    location.href = config.classgameUrl;
 }
 </script>
 {% endblock %}
