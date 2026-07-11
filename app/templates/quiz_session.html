@@ -649,6 +649,8 @@
 
         const formData = new FormData();
         formData.append('file', input.files[0]);
+        formData.append('session_id', sessionId);
+        formData.append('purpose', 'quiz');
 
         try {
             const res = await fetch('/upload', {
@@ -1007,8 +1009,8 @@
 
     socket.on('new_response', (data) => {
         if (isAdmin) {
-            updateStats();
             addResponseToList(data);
+            updateStats();
         }
     });
 
@@ -1079,6 +1081,8 @@
         if (scored.length > 0) {
             const correct = scored.filter(r => r.is_correct).length;
             document.getElementById('stat-avg-score').innerText = Math.round((correct / scored.length) * 100) + '%';
+        } else {
+            document.getElementById('stat-avg-score').innerText = '0%';
         }
     }
 

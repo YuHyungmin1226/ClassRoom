@@ -3,6 +3,7 @@ import os
 import signal
 import warnings
 import logging
+import socket
 
 warnings.filterwarnings(
     "ignore",
@@ -10,8 +11,7 @@ warnings.filterwarnings(
 )
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-from app import create_app, socketio
-import socket
+from app import create_app, socketio  # noqa: E402
 
 def get_all_local_ips():
     ips = []
@@ -50,7 +50,7 @@ if __name__ == '__main__':
         local_ips = get_all_local_ips()
         print("="*60)
         print("Classroom Server is running!")
-        print(f"Classroom Portal: http://localhost:5555")
+        print("Classroom Portal: http://localhost:5555")
 
         for i, ip in enumerate(local_ips):
             print(f"Network Access: http://{ip}:5555")

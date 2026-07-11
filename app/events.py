@@ -1,9 +1,19 @@
 import os
-from flask_socketio import emit, join_room, leave_room
+import math
+import re
+from flask_socketio import emit, join_room, leave_room, rooms
+from sqlalchemy.exc import SQLAlchemyError
 from . import socketio, db
-from .models import Flag, QuizQuestion, QuizResponse, Session
-from .config import Config
-from flask import request, session
+from .models import Flag, QuizQuestion, QuizResponse, Session, Upload
+from flask import current_app, request, session
+
+
+POST_TYPES = frozenset({'normal', 'notice', 'objective'})
+QUESTION_TYPES = frozenset({'choice', 'short', 'long'})
+DRAW_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+QUESTION_UPLOAD_RE = re.compile(
+    r'(?<![A-Za-z0-9_])/?(uploads/[A-Za-z0-9][A-Za-z0-9_.-]*)'
+)
 
 
 def _admin_room(session_id):
@@ -17,24 +27,50 @@ def _session_writable(session_id):
     """
     if not session_id:
         return False
-    sess = Session.query.get(session_id)
-    return bool(sess) and (sess.is_active or session.get('admin_logged_in', False))
+    sess = db.session.get(Session, session_id)
+    return bool(sess) and session_id in rooms() and (
+        sess.is_open or session.get('admin_logged_in', False)
+    )
 
 
-def _validate_upload_path(rel_path):
-    """클라이언트가 보낸 file_path/thumbnail_path가 실제 업로드 폴더 안의 파일을 가리키는지 검증.
-    basename만 사용해 경로 조작(../)과 프로토콜 상대 URL(//evil.example/...) 주입을 차단한다 —
-    검증 없이 저장하면 target=_blank 첨부 링크가 외부 사이트를 여는 피싱 벡터가 된다.
-    """
-    if not rel_path:
+def _quiz_session(session_id):
+    sess = db.session.get(Session, session_id) if session_id else None
+    if not sess or not sess.class_group or sess.class_group.class_type != 'classquiz':
         return None
-    filename = os.path.basename(str(rel_path).replace('\\', '/'))
-    if not filename:
+    return sess
+
+
+def _upload_owner_id():
+    return _current_participant_id() or (
+        'admin' if session.get('admin_logged_in') else None
+    )
+
+
+def _owned_flag_upload(file_path, session_id, current_flag_id=None):
+    """Return a staged upload only when it belongs to this user and session."""
+    if not file_path:
         return None
-    abs_path = os.path.join(Config.UPLOAD_FOLDER, filename)
-    if os.path.isfile(abs_path):
-        return f"uploads/{filename}"
-    return None
+
+    filename = os.path.basename(str(file_path).replace('\\', '/'))
+    canonical_path = f"uploads/{filename}"
+    upload = Upload.query.filter_by(file_path=canonical_path).first()
+    if (
+        not upload
+        or upload.session_id != session_id
+        or upload.owner_id != _upload_owner_id()
+        or upload.purpose != 'flag'
+        or upload.flag_id not in (None, current_flag_id)
+    ):
+        return None
+
+    upload_folder = current_app.config['UPLOAD_FOLDER']
+    if not os.path.isfile(os.path.join(upload_folder, filename)):
+        return None
+    if upload.thumbnail_path:
+        thumb_name = os.path.basename(upload.thumbnail_path)
+        if not os.path.isfile(os.path.join(upload_folder, thumb_name)):
+            upload.thumbnail_path = None
+    return upload
 
 
 def _delete_upload_file(rel_path):
@@ -42,12 +78,92 @@ def _delete_upload_file(rel_path):
     if not rel_path:
         return
     filename = os.path.basename(str(rel_path).replace('\\', '/'))
-    abs_path = os.path.join(Config.UPLOAD_FOLDER, filename)
+    abs_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
     try:
         if os.path.isfile(abs_path):
             os.remove(abs_path)
     except Exception as e:
         print(f"Failed to delete orphaned file {abs_path}: {e}")
+
+
+def _delete_upload_files_if_unreferenced(paths):
+    for rel_path in paths:
+        if not rel_path:
+            continue
+        referenced = Upload.query.filter(
+            (Upload.file_path == rel_path) | (Upload.thumbnail_path == rel_path)
+        ).first() or Flag.query.filter(
+            (Flag.file_path == rel_path) | (Flag.thumbnail_path == rel_path)
+        ).first()
+        if not referenced:
+            _delete_upload_file(rel_path)
+
+
+def _question_payload(data, current=None):
+    try:
+        index = int(data.get('index', current.index if current else None))
+    except (TypeError, ValueError):
+        return None
+
+    q_type = str(data.get('q_type', current.q_type if current else '')).strip().lower()
+    question = str(data.get('question', current.question if current else '')).strip()
+    options = str(data.get('options', current.options if current else '') or '').strip()
+    correct_answer = str(
+        data.get('correct_answer', current.correct_answer if current else '') or ''
+    ).strip()
+    if q_type not in QUESTION_TYPES or not question or not 0 <= index <= 100000:
+        return None
+    if q_type == 'choice' and len([item for item in options.split('|') if item.strip()]) < 2:
+        return None
+    if q_type in {'choice', 'short'} and not correct_answer:
+        return None
+    return {
+        'index': index,
+        'q_type': q_type,
+        'question': question,
+        'options': options,
+        'correct_answer': correct_answer,
+    }
+
+
+def _sync_quiz_uploads(question):
+    referenced_paths = set(QUESTION_UPLOAD_RE.findall(question.question or ''))
+    files_to_delete = set()
+
+    for upload in Upload.query.filter_by(
+        session_id=question.session_id,
+        purpose='quiz',
+        question_id=question.id,
+    ).all():
+        if upload.file_path not in referenced_paths:
+            replacement = _other_question_using_upload(upload, question.id)
+            if replacement:
+                upload.question_id = replacement.id
+            else:
+                files_to_delete.update((upload.file_path, upload.thumbnail_path))
+                db.session.delete(upload)
+
+    for file_path in referenced_paths:
+        upload = Upload.query.filter_by(
+            session_id=question.session_id,
+            purpose='quiz',
+            file_path=file_path,
+        ).first()
+        if upload and upload.question_id in (None, question.id):
+            upload.question_id = question.id
+
+    return files_to_delete
+
+
+def _other_question_using_upload(upload, excluded_question_id):
+    candidates = QuizQuestion.query.filter(
+        QuizQuestion.session_id == upload.session_id,
+        QuizQuestion.id != excluded_question_id,
+    ).all()
+    for question in candidates:
+        if upload.file_path in set(QUESTION_UPLOAD_RE.findall(question.question or '')):
+            return question
+    return None
 
 
 def _serialize_question(q, include_answer):
@@ -124,8 +240,8 @@ def on_join(data):
     is_admin = session.get('admin_logged_in', False)
 
     # 세션 존재/활성 여부 검증 — 닫혔거나 없는 세션은 비관리자에게 데이터 미제공
-    sess = Session.query.get(room)
-    if not sess or (not sess.is_active and not is_admin):
+    sess = db.session.get(Session, room)
+    if not sess or (not sess.is_open and not is_admin):
         emit('join_rejected', {'session_id': room}, to=request.sid)
         return
 
@@ -175,19 +291,33 @@ def on_leave(data):
     if not room:
         return
     leave_room(room)
+    if session.get('admin_logged_in'):
+        leave_room(_admin_room(room))
 
 @socketio.on('add_flag')
 def on_add_flag(data):
     session_id = data.get('session_id')
     if not _session_writable(session_id):
         return
-    region_id = data.get('region_id')
-    x = data.get('x')
-    y = data.get('y')
+    target_session = db.session.get(Session, session_id)
+    if target_session.class_group.class_type == 'classquiz':
+        return
+
+    region_id = str(data.get('region_id') or '').strip()
+    if not region_id or len(region_id) > 50:
+        return
+    try:
+        x = float(data['x']) if data.get('x') not in (None, '') else None
+        y = float(data['y']) if data.get('y') not in (None, '') else None
+    except (TypeError, ValueError):
+        return
+    if any(value is not None and not math.isfinite(value) for value in (x, y)):
+        return
+
     text_content = data.get('text_content')
-    file_path = _validate_upload_path(data.get('file_path'))
-    thumbnail_path = _validate_upload_path(data.get('thumbnail_path'))
-    author_name = data.get('author_name', 'Participant')
+    if text_content is not None and not isinstance(text_content, str):
+        return
+    author_name = str(data.get('author_name') or 'Participant').strip()[:100] or 'Participant'
     is_admin = session.get('admin_logged_in', False)
     # 서명된 participant_id가 없는 소켓(참여자용 HTTP 세션 페이지를 거치지 않은 클라이언트)은
     # 클라이언트가 보낸 client_id를 신뢰할 수 없으므로 쓰기를 거부한다 — 그 값은 다른 참여자의
@@ -198,10 +328,18 @@ def on_add_flag(data):
     # 세션 값이 없을 때만(예외적, 관리자 한정) 클라이언트 값으로 폴백.
     client_id = _current_participant_id() or data.get('client_id')
     post_type = data.get('post_type', 'normal')
+    if post_type not in POST_TYPES:
+        post_type = 'normal'
 
     # Permission check: Only admin can create notice or objective
     if not is_admin and post_type in ['notice', 'objective']:
         post_type = 'normal'
+
+    upload = None
+    if data.get('file_path'):
+        upload = _owned_flag_upload(data.get('file_path'), session_id)
+        if not upload:
+            return
 
     new_flag = Flag(
         session_id=session_id,
@@ -209,14 +347,22 @@ def on_add_flag(data):
         x=x,
         y=y,
         text_content=text_content,
-        file_path=file_path,
-        thumbnail_path=thumbnail_path,
+        file_path=upload.file_path if upload else None,
+        thumbnail_path=upload.thumbnail_path if upload else None,
         author_name=author_name,
         client_id=client_id,
         post_type=post_type
     )
     db.session.add(new_flag)
-    db.session.commit()
+    try:
+        db.session.flush()
+        if upload:
+            upload.flag_id = new_flag.id
+        db.session.commit()
+    except SQLAlchemyError as error:
+        db.session.rollback()
+        print(f"Failed to create flag: {error}")
+        return
 
     flag_data = _serialize_flag(new_flag)
     
@@ -230,8 +376,8 @@ def on_edit_flag(data):
         return
     flag_id = data.get('flag_id')
 
-    flag = Flag.query.get(flag_id)
-    if flag:
+    flag = db.session.get(Flag, flag_id)
+    if flag and flag.session_id == session_id:
         # Authorization check: Admin or the person who created the flag
         is_admin = session.get('admin_logged_in', False)
         # 서명된 participant_id가 없는 소켓은 client_id를 신뢰하지 않는다 —
@@ -255,20 +401,45 @@ def on_edit_flag(data):
                 return
             
         flag.text_content = data.get('text_content', flag.text_content)
-        flag.post_type = data.get('post_type', flag.post_type)
+        requested_post_type = data.get('post_type', flag.post_type)
+        if is_admin and requested_post_type in POST_TYPES:
+            flag.post_type = requested_post_type
         
-        # If new file is uploaded, update paths — 교체 전 기존 파일을 삭제해 디스크 누수를 방지
+        files_to_delete = set()
+        old_upload_to_delete = None
+        new_upload_to_claim = None
+        # If a new file is uploaded, claim it before releasing the previous one.
         if 'file_path' in data:
-            old_file_path = flag.file_path
-            old_thumbnail_path = flag.thumbnail_path
-            flag.file_path = _validate_upload_path(data.get('file_path'))
-            flag.thumbnail_path = _validate_upload_path(data.get('thumbnail_path'))
-            if old_file_path and old_file_path != flag.file_path:
-                _delete_upload_file(old_file_path)
-            if old_thumbnail_path and old_thumbnail_path != flag.thumbnail_path:
-                _delete_upload_file(old_thumbnail_path)
+            new_upload = None
+            if data.get('file_path'):
+                new_upload = _owned_flag_upload(
+                    data.get('file_path'), session_id, current_flag_id=flag.id
+                )
+                if not new_upload:
+                    return
+            old_upload = Upload.query.filter_by(flag_id=flag.id).first()
+            old_paths = {flag.file_path, flag.thumbnail_path}
+            flag.file_path = new_upload.file_path if new_upload else None
+            flag.thumbnail_path = new_upload.thumbnail_path if new_upload else None
+            if old_upload and old_upload.id != (new_upload.id if new_upload else None):
+                old_upload_to_delete = old_upload
+            new_upload_to_claim = new_upload
+            files_to_delete = old_paths - {flag.file_path, flag.thumbnail_path}
 
-        db.session.commit()
+        try:
+            if old_upload_to_delete:
+                old_upload_to_delete.flag_id = None
+                db.session.flush()
+            if new_upload_to_claim:
+                new_upload_to_claim.flag_id = flag.id
+            if old_upload_to_delete:
+                db.session.delete(old_upload_to_delete)
+            db.session.commit()
+        except SQLAlchemyError as error:
+            db.session.rollback()
+            print(f"Failed to edit flag: {error}")
+            return
+        _delete_upload_files_if_unreferenced(files_to_delete)
         
         flag_data = _serialize_flag(flag)
         
@@ -282,11 +453,11 @@ def on_delete_flag(data):
     flag_id = data.get('flag_id')
 
     try:
-        flag = Flag.query.get(int(flag_id))
+        flag = db.session.get(Flag, int(flag_id))
     except (TypeError, ValueError):
-        flag = Flag.query.get(flag_id)
+        flag = db.session.get(Flag, flag_id)
 
-    if flag:
+    if flag and flag.session_id == session_id:
         # 브로드캐스트에는 DB의 실제 PK(정수)를 사용 — 클라이언트 DOM 매칭 불일치 방지
         canonical_id = flag.id
         # Permission check:
@@ -309,8 +480,21 @@ def on_delete_flag(data):
                 print(f"Unauthorized delete attempt for flag {flag_id} by client {requester_client_id}")
                 return
 
-        db.session.delete(flag)
-        db.session.commit()
+        upload = Upload.query.filter_by(flag_id=flag.id).first()
+        files_to_delete = {flag.file_path, flag.thumbnail_path}
+        try:
+            if upload:
+                upload.flag_id = None
+                db.session.flush()
+                db.session.delete(upload)
+                db.session.flush()
+            db.session.delete(flag)
+            db.session.commit()
+        except SQLAlchemyError as error:
+            db.session.rollback()
+            print(f"Failed to delete flag: {error}")
+            return
+        _delete_upload_files_if_unreferenced(files_to_delete)
 
         emit('flag_deleted', {'id': canonical_id, 'session_id': session_id}, to=session_id)
         
@@ -319,83 +503,168 @@ def on_draw_data(data):
     session_id = data.get('session_id')
     if not _session_writable(session_id):
         return
+    draw_session = db.session.get(Session, session_id)
+    if draw_session.class_group.class_type != 'classdraw':
+        return
+    if not session.get('admin_logged_in') and not _current_participant_id():
+        return
+
+    try:
+        coordinates = [float(data[key]) for key in ('x', 'y', 'prevX', 'prevY')]
+        size = float(data.get('size'))
+    except (KeyError, TypeError, ValueError):
+        return
+    color = str(data.get('color', ''))
+    if (
+        not all(math.isfinite(value) and 0 <= value <= 1 for value in coordinates)
+        or not math.isfinite(size)
+        or not 1 <= size <= 40
+        or not DRAW_COLOR_RE.fullmatch(color)
+    ):
+        return
+
+    payload = {
+        'session_id': session_id,
+        'x': coordinates[0],
+        'y': coordinates[1],
+        'prevX': coordinates[2],
+        'prevY': coordinates[3],
+        'color': color,
+        'size': size,
+    }
     # Broadcast drawing data to everyone else in the room
-    emit('draw_data', data, to=session_id, include_self=False)
+    emit('draw_data', payload, to=session_id, include_self=False)
 
 @socketio.on('clear_canvas')
 def on_clear_canvas(data):
     session_id = data.get('session_id')
     # Authorization check for clearing canvas (admin only)
-    if session.get('admin_logged_in'):
+    draw_session = db.session.get(Session, session_id) if session_id else None
+    if (
+        session.get('admin_logged_in')
+        and _session_writable(session_id)
+        and draw_session.class_group.class_type == 'classdraw'
+    ):
         emit('clear_canvas', {}, to=session_id)
 
 # --- ClassQuiz Events ---
 
 @socketio.on('add_quiz_question')
 def on_add_quiz_question(data):
-    if not session.get('admin_logged_in'): return
+    if not session.get('admin_logged_in'):
+        return
     
     session_id = data.get('session_id')
-    new_q = QuizQuestion(
-        session_id=session_id,
-        index=data.get('index'),
-        q_type=data.get('q_type'),
-        question=data.get('question'),
-        options=data.get('options'),
-        correct_answer=data.get('correct_answer')
-    )
+    if not _quiz_session(session_id):
+        return
+    values = _question_payload(data)
+    if not values:
+        return
+    new_q = QuizQuestion(session_id=session_id, **values)
     db.session.add(new_q)
-    db.session.commit()
+    try:
+        db.session.flush()
+        files_to_delete = _sync_quiz_uploads(new_q)
+        db.session.commit()
+    except SQLAlchemyError as error:
+        db.session.rollback()
+        print(f"Failed to add quiz question: {error}")
+        return
+    _delete_upload_files_if_unreferenced(files_to_delete)
     
     broadcast_questions(session_id)
 
 @socketio.on('bulk_add_questions')
 def on_bulk_add_questions(data):
-    if not session.get('admin_logged_in'): return
+    if not session.get('admin_logged_in'):
+        return
     session_id = data.get('session_id')
+    if not _quiz_session(session_id):
+        return
     new_questions = data.get('questions', [])
-    
-    for q in new_questions:
-        new_q = QuizQuestion(
-            session_id=session_id,
-            index=q.get('index'),
-            q_type=q.get('q_type'),
-            question=q.get('question'),
-            options=q.get('options'),
-            correct_answer=q.get('correct_answer')
-        )
-        db.session.add(new_q)
-    
-    db.session.commit()
+    if not isinstance(new_questions, list) or not new_questions:
+        return
+    values_list = [_question_payload(question) for question in new_questions]
+    if any(values is None for values in values_list):
+        return
+    files_to_delete = set()
+    try:
+        for values in values_list:
+            question = QuizQuestion(session_id=session_id, **values)
+            db.session.add(question)
+            db.session.flush()
+            files_to_delete.update(_sync_quiz_uploads(question))
+        db.session.commit()
+    except SQLAlchemyError as error:
+        db.session.rollback()
+        print(f"Failed to add quiz questions: {error}")
+        return
+    _delete_upload_files_if_unreferenced(files_to_delete)
     broadcast_questions(session_id)
 
 @socketio.on('edit_quiz_question')
 def on_edit_quiz_question(data):
-    if not session.get('admin_logged_in'): return
+    if not session.get('admin_logged_in'):
+        return
     session_id = data.get('session_id')
+    if not _quiz_session(session_id):
+        return
     q_id = data.get('question_id')
     
-    q = QuizQuestion.query.get(q_id)
-    if q:
-        q.index = data.get('index', q.index)
-        q.q_type = data.get('q_type', q.q_type)
-        q.question = data.get('question', q.question)
-        q.options = data.get('options', q.options)
-        q.correct_answer = data.get('correct_answer', q.correct_answer)
-        db.session.commit()
+    q = db.session.get(QuizQuestion, q_id)
+    if q and q.session_id == session_id:
+        values = _question_payload(data, current=q)
+        if not values:
+            return
+        for field, value in values.items():
+            setattr(q, field, value)
+        files_to_delete = _sync_quiz_uploads(q)
+        try:
+            db.session.commit()
+        except SQLAlchemyError as error:
+            db.session.rollback()
+            print(f"Failed to edit quiz question: {error}")
+            return
+        _delete_upload_files_if_unreferenced(files_to_delete)
         broadcast_questions(session_id)
 
 @socketio.on('delete_quiz_question')
 def on_delete_quiz_question(data):
-    if not session.get('admin_logged_in'): return
+    if not session.get('admin_logged_in'):
+        return
     session_id = data.get('session_id')
+    if not _quiz_session(session_id):
+        return
     q_id = data.get('question_id')
     
-    q = QuizQuestion.query.get(q_id)
-    if q:
-        QuizResponse.query.filter_by(question_id=q.id).delete()
-        db.session.delete(q)
-        db.session.commit()
+    q = db.session.get(QuizQuestion, q_id)
+    if q and q.session_id == session_id:
+        uploads = Upload.query.filter_by(question_id=q.id, purpose='quiz').all()
+        uploads_to_delete = []
+        files_to_delete = set()
+        try:
+            for upload in uploads:
+                replacement = _other_question_using_upload(upload, q.id)
+                if replacement:
+                    upload.question_id = replacement.id
+                else:
+                    upload.question_id = None
+                    uploads_to_delete.append(upload)
+                    files_to_delete.update((upload.file_path, upload.thumbnail_path))
+            if uploads:
+                db.session.flush()
+            for upload in uploads_to_delete:
+                db.session.delete(upload)
+            if uploads_to_delete:
+                db.session.flush()
+            QuizResponse.query.filter_by(question_id=q.id).delete()
+            db.session.delete(q)
+            db.session.commit()
+        except SQLAlchemyError as error:
+            db.session.rollback()
+            print(f"Failed to delete quiz question: {error}")
+            return
+        _delete_upload_files_if_unreferenced(files_to_delete)
         broadcast_questions(session_id)
 
 @socketio.on('submit_quiz_response')
@@ -411,12 +680,13 @@ def on_submit_quiz_response(data):
     # 소유자 식별은 서버 신뢰 값 사용
     client_id = _current_participant_id()
     response_text = data.get('response')
-    author_name = data.get('author_name', 'Participant')
+    author_name = str(data.get('author_name') or 'Participant').strip()[:100] or 'Participant'
 
     # 입력 검증: 문제/응답/식별자가 없으면 무시 (NOT NULL 위반 및 세션 오염 방지)
-    q = QuizQuestion.query.get(q_id) if q_id is not None else None
-    if not q or not client_id or response_text is None:
+    q = db.session.get(QuizQuestion, q_id) if q_id is not None else None
+    if not q or not client_id or not isinstance(response_text, str):
         return
+    response_text = response_text[:10000]
 
     # Grading logic
     is_correct = False
@@ -489,8 +759,11 @@ def on_submit_quiz_response(data):
 
 @socketio.on('get_admin_results')
 def on_get_admin_results(data):
-    if not session.get('admin_logged_in'): return
+    if not session.get('admin_logged_in'):
+        return
     session_id = data.get('session_id')
+    if not _quiz_session(session_id):
+        return
     
     questions = QuizQuestion.query.filter_by(session_id=session_id).all()
     responses = QuizResponse.query.filter_by(session_id=session_id).all()

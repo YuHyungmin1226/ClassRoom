@@ -15,6 +15,30 @@ then
     exit 1
 fi
 
+# Check the port before creating or updating the virtual environment
+echo "Checking port 5555..."
+PORT_IN_USE=0
+if command -v lsof >/dev/null 2>&1; then
+    if lsof -nP -iTCP:5555 -sTCP:LISTEN -t 2>/dev/null | grep -q .; then
+        PORT_IN_USE=1
+    fi
+elif command -v ss >/dev/null 2>&1; then
+    if ss -ltn 2>/dev/null | awk '$4 ~ /:5555$/ { found=1 } END { exit !found }'; then
+        PORT_IN_USE=1
+    fi
+else
+    if python3 -c "import socket,sys; s=socket.socket(); s.settimeout(0.2); sys.exit(0 if s.connect_ex(('127.0.0.1', 5555)) == 0 else 1)"; then
+        PORT_IN_USE=1
+    fi
+fi
+
+if [ "$PORT_IN_USE" = "1" ]; then
+    echo "Error: Port 5555 is already in use."
+    echo "Close the application using port 5555, then run this launcher again."
+    echo "No existing process was terminated."
+    exit 1
+fi
+
 # Create/Verify virtual environment
 VENV_DIR="venv"
 VENV_ACTIVATE="$VENV_DIR/bin/activate"
@@ -80,10 +104,6 @@ if [ "$NEED_INSTALL" = "1" ]; then
 else
     echo "✅ Dependencies are up to date."
 fi
-
-# Attempt to stop any existing ghost process running on port 5555
-echo "🧹 Cleaning up port 5555..."
-lsof -t -iTCP:5555 -sTCP:LISTEN | xargs -I {} kill -9 {} 2>/dev/null || true
 
 # Run the application
 echo "🚀 Launching Application..."

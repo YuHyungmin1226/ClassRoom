@@ -15,25 +15,31 @@
         <button
             type="button"
             class="game-card"
+            aria-label="{{ game.name }} 실행"
             data-game-name="{{ game.name }}"
             data-play-url="{{ game.play_url }}"
+            {% if game.cover_url %}style="--game-cover: url('{{ game.cover_url }}');"{% endif %}
             {% if not game.available %}disabled{% endif %}>
             <span class="game-tag">{{ game.subtitle }}</span>
             <span class="game-title">{{ game.name }}</span>
             <span class="game-description">{{ game.description }}</span>
+            <span class="game-input">{{ game.input }}</span>
             <span class="game-action">{{ '전체화면으로 시작' if game.available else '게임 파일 없음' }}</span>
         </button>
         {% endfor %}
     </div>
 </div>
 
-<div class="game-stage" id="game-stage" aria-hidden="true">
+<div class="game-stage" id="game-stage" role="dialog" aria-modal="true" aria-label="ClassGame 실행 화면" aria-hidden="true" tabindex="-1">
     <div class="game-stage-toolbar">
         <button type="button" class="stage-btn" id="exit-game">나가기</button>
         <div class="stage-title" id="active-game-title">ClassGame</div>
         <button type="button" class="stage-btn" id="fullscreen-game">전체화면</button>
     </div>
-    <iframe id="game-frame" class="game-frame" title="ClassGame player" allow="fullscreen; autoplay"></iframe>
+    <iframe id="game-frame" class="game-frame" title="ClassGame player"
+        sandbox="allow-scripts allow-pointer-lock" referrerpolicy="no-referrer"
+        allow="fullscreen; autoplay"></iframe>
+    <div class="stage-status" id="fullscreen-status" aria-live="polite"></div>
 </div>
 
 <style>
@@ -65,7 +71,7 @@
 
 .game-library {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
     gap: 18px;
 }
 
@@ -73,9 +79,12 @@
     min-height: 220px;
     border: 1px solid #d1d5db;
     border-radius: 12px;
-    background:
-        linear-gradient(150deg, rgba(17, 24, 39, 0.92), rgba(69, 10, 10, 0.9)),
-        #111827;
+    background-color: #111827;
+    background-image:
+        linear-gradient(150deg, rgba(17, 24, 39, 0.82), rgba(69, 10, 10, 0.76)),
+        var(--game-cover, none);
+    background-position: center;
+    background-size: cover;
     color: white;
     cursor: pointer;
     display: flex;
@@ -118,6 +127,7 @@
 .game-tag,
 .game-title,
 .game-description,
+.game-input,
 .game-action {
     position: relative;
     z-index: 1;
@@ -140,6 +150,12 @@
     color: #e5e7eb;
     line-height: 1.5;
     max-width: 420px;
+}
+
+.game-input {
+    color: #d1d5db;
+    font-size: 0.82rem;
+    font-weight: 700;
 }
 
 .game-action {
@@ -177,12 +193,12 @@
     display: flex;
     gap: 12px;
     justify-content: space-between;
-    left: 12px;
-    opacity: 0.32;
+    left: max(12px, env(safe-area-inset-left));
+    opacity: 0.78;
     pointer-events: none;
     position: absolute;
-    right: 12px;
-    top: 12px;
+    right: max(12px, env(safe-area-inset-right));
+    top: max(12px, env(safe-area-inset-top));
     transition: opacity 0.2s ease;
     z-index: 2;
 }
@@ -213,9 +229,27 @@
     color: #f8fafc;
     cursor: pointer;
     font-weight: 700;
-    min-height: 38px;
+    min-height: 44px;
     padding: 0 14px;
     pointer-events: auto;
+}
+
+.stage-status {
+    background: rgba(3, 7, 18, 0.86);
+    border-radius: 6px;
+    bottom: max(16px, env(safe-area-inset-bottom));
+    color: #f8fafc;
+    display: none;
+    left: 50%;
+    max-width: calc(100vw - 32px);
+    padding: 10px 14px;
+    position: absolute;
+    transform: translateX(-50%);
+    z-index: 3;
+}
+
+.stage-status.visible {
+    display: block;
 }
 
 .stage-btn:hover,
@@ -251,16 +285,32 @@ body.classgame-playing {
     const title = document.getElementById('active-game-title');
     const exitButton = document.getElementById('exit-game');
     const fullscreenButton = document.getElementById('fullscreen-game');
+    const fullscreenStatus = document.getElementById('fullscreen-status');
+    const library = document.querySelector('.classgame-container');
+    const navbar = document.querySelector('.navbar');
+    let previousFocus = null;
+
+    function setFullscreenStatus(message) {
+        fullscreenStatus.textContent = message || '';
+        fullscreenStatus.classList.toggle('visible', Boolean(message));
+    }
 
     function requestStageFullscreen() {
         const request = stage.requestFullscreen || stage.webkitRequestFullscreen;
-        if (!request) return;
+        if (!request) {
+            setFullscreenStatus('브라우저 전체화면을 지원하지 않아 현재 창에 맞춰 실행합니다.');
+            return;
+        }
         try {
             const result = request.call(stage);
             if (result && typeof result.catch === 'function') {
-                result.catch(function () {});
+                result.catch(function () {
+                    setFullscreenStatus('전체화면을 시작할 수 없어 현재 창에 맞춰 실행합니다.');
+                });
             }
-        } catch (error) {}
+        } catch (error) {
+            setFullscreenStatus('전체화면을 시작할 수 없어 현재 창에 맞춰 실행합니다.');
+        }
     }
 
     function focusGameFrame() {
@@ -273,10 +323,14 @@ body.classgame-playing {
     function openGame(button) {
         const playUrl = button.dataset.playUrl;
         const gameName = button.dataset.gameName || 'ClassGame';
+        previousFocus = document.activeElement;
         title.textContent = gameName;
         stage.classList.add('active');
         stage.setAttribute('aria-hidden', 'false');
         document.body.classList.add('classgame-playing');
+        library.setAttribute('inert', '');
+        if (navbar) navbar.setAttribute('inert', '');
+        setFullscreenStatus('');
         requestStageFullscreen();
         frame.src = playUrl;
         window.setTimeout(focusGameFrame, 250);
@@ -287,11 +341,17 @@ body.classgame-playing {
         stage.classList.remove('active');
         stage.setAttribute('aria-hidden', 'true');
         document.body.classList.remove('classgame-playing');
+        library.removeAttribute('inert');
+        if (navbar) navbar.removeAttribute('inert');
+        setFullscreenStatus('');
         if (document.fullscreenElement && document.exitFullscreen) {
             const result = document.exitFullscreen();
             if (result && typeof result.catch === 'function') {
                 result.catch(function () {});
             }
+        }
+        if (previousFocus && typeof previousFocus.focus === 'function') {
+            previousFocus.focus();
         }
     }
 
@@ -304,8 +364,27 @@ body.classgame-playing {
     frame.addEventListener('load', focusGameFrame);
     exitButton.addEventListener('click', closeGame);
     fullscreenButton.addEventListener('click', function () {
-        requestStageFullscreen();
+        if (document.fullscreenElement === stage && document.exitFullscreen) {
+            const result = document.exitFullscreen();
+            if (result && typeof result.catch === 'function') {
+                result.catch(function () {});
+            }
+        } else {
+            requestStageFullscreen();
+        }
         focusGameFrame();
+    });
+    document.addEventListener('fullscreenchange', function () {
+        fullscreenButton.textContent = document.fullscreenElement === stage ? '전체화면 해제' : '전체화면';
+        if (document.fullscreenElement === stage) setFullscreenStatus('');
+    });
+    document.addEventListener('fullscreenerror', function () {
+        setFullscreenStatus('전체화면을 시작할 수 없어 현재 창에 맞춰 실행합니다.');
+    });
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && stage.classList.contains('active') && !document.fullscreenElement) {
+            closeGame();
+        }
     });
 })();
 </script>

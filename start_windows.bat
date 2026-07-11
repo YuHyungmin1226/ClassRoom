@@ -6,6 +6,17 @@ echo ========================================
 echo       ClassMap Server Launcher (Win)
 echo ========================================
 
+:: Check the port before creating or updating the local Python runtime
+echo [*] Checking port 5555...
+netstat -aon | findstr /C:":5555 " | findstr LISTENING >nul 2>&1
+if not errorlevel 1 (
+    echo [ERROR] Port 5555 is already in use.
+    echo Close the application using port 5555, then run this launcher again.
+    echo No existing process was terminated.
+    pause
+    exit /b 1
+)
+
 set PYTHON_DIR=%~dp0python_portable
 set PYTHON_EXE=%PYTHON_DIR%\python.exe
 set PIP_EXE=%PYTHON_DIR%\Scripts\pip.exe
@@ -68,14 +79,7 @@ if "!NEED_INSTALL!"=="1" (
     echo [*] Dependencies are up to date, skipping install.
 )
 
-:: 3. Cleanup Port 5555
-echo [*] Cleaning up port 5555...
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr /C:":5555 " ^| findstr LISTENING') do (
-    echo [WARN] Killing process %%a using port 5555...
-    taskkill /f /pid %%a >nul 2>&1
-)
-
-:: 4. Launch Application
+:: 3. Launch Application
 echo [*] Launching Application...
 echo ========================================
 "%PYTHON_EXE%" run.py

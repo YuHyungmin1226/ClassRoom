@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, flash, send_from_directory, send_file, abort
+from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, flash, send_from_directory, send_file, abort, current_app
 from werkzeug.utils import secure_filename
 from PIL import Image
 import os
@@ -6,23 +6,34 @@ import uuid
 import io
 import zipfile
 from datetime import datetime
+from pathlib import PurePosixPath
 from . import db
-from .models import Admin, ClassGroup, Session, Flag, QuizQuestion, QuizResponse
-from .config import Config
+from .models import Admin, ClassGroup, Session, Flag, QuizQuestion, QuizResponse, Upload
 
 main = Blueprint('main', __name__)
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'webm', 'mov'}
+CLASS_TYPES = frozenset({'classmap', 'classwrite', 'classdraw', 'classquiz'})
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+WORKSPACE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 GAME_LIBRARY = {
     'dialike': {
         'id': 'dialike',
         'name': 'DIALIKE',
         'subtitle': 'Dark Action RPG',
         'description': '디아블로 스타일 전투, 파밍, 장비 성장을 담은 웹 액션 RPG',
-        'folder': os.path.join(PROJECT_ROOT, 'dialike'),
+        'input': '키보드 · 마우스',
+        'folder': os.path.abspath(os.environ.get(
+            'CLASSGAME_DIALIKE_PATH',
+            os.path.join(WORKSPACE_ROOT, 'dialike'),
+        )),
         'entry': 'index.html',
+        'cover': 'assets/tile_stone.png',
+        'public_files': frozenset({'index.html', 'style.css'}),
+        'public_dirs': {
+            'assets': frozenset({'.png', '.jpg', '.jpeg', '.gif', '.webp'}),
+            'js': frozenset({'.js'}),
+        },
     },
 }
 
@@ -33,6 +44,13 @@ def _available_games():
         item = dict(game)
         item['available'] = os.path.isfile(os.path.join(game['folder'], game['entry']))
         item['play_url'] = url_for('main.classgame_files', game_id=game['id'])
+        item['cover_url'] = (
+            url_for('main.classgame_files', game_id=game['id'], filename=game['cover'])
+            if (
+                _public_game_filename(game, game.get('cover'))
+                and os.path.isfile(os.path.join(game['folder'], game['cover']))
+            ) else None
+        )
         games.append(item)
     return games
 
@@ -43,16 +61,56 @@ def _get_game_or_404(game_id):
         abort(404)
     return game
 
+
+def _public_game_filename(game, filename):
+    """Return a normalized public asset path, or None for private files."""
+    if not filename:
+        return None
+
+    path = PurePosixPath(str(filename).replace('\\', '/'))
+    parts = path.parts
+    if (
+        not parts
+        or path.is_absolute()
+        or '..' in parts
+        or any(part.startswith('.') for part in parts)
+    ):
+        return None
+
+    normalized = path.as_posix()
+    if normalized in game.get('public_files', ()):
+        return normalized
+
+    allowed_extensions = game.get('public_dirs', {}).get(parts[0])
+    if len(parts) > 1 and allowed_extensions and path.suffix.lower() in allowed_extensions:
+        return normalized
+    return None
+
 @main.route('/uploads/<filename>')
 def uploaded_file(filename):
-    # 마감된 세션의 첨부파일은 view_class/view_session과 동일하게 비관리자에게 비공개 처리
-    if not session.get('admin_logged_in'):
-        flag = Flag.query.filter(
-            (Flag.file_path == f"uploads/{filename}") | (Flag.thumbnail_path == f"uploads/{filename}")
+    relative_path = f"uploads/{filename}"
+    upload = Upload.query.filter(
+        (Upload.file_path == relative_path) | (Upload.thumbnail_path == relative_path)
+    ).first()
+    legacy_flag = None
+    if not upload:
+        legacy_flag = Flag.query.filter(
+            (Flag.file_path == relative_path) | (Flag.thumbnail_path == relative_path)
         ).first()
-        if flag and not flag.session.is_active:
+        if not legacy_flag:
+            abort(404)
+
+    # Closed-session attachments remain available to administrators only.
+    if not session.get('admin_logged_in'):
+        owning_session = upload.session if upload else legacy_flag.session
+        if not owning_session.is_open:
             return "This session is closed.", 403
-    return send_from_directory(Config.UPLOAD_FOLDER, filename)
+    extension = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    return send_from_directory(
+        current_app.config['UPLOAD_FOLDER'],
+        filename,
+        as_attachment=extension in {'html', 'htm', 'svg', 'xml'},
+    )
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -61,12 +119,32 @@ def delete_file_safe(file_path):
     if not file_path:
         return
     filename = os.path.basename(file_path)
-    abs_path = os.path.join(Config.UPLOAD_FOLDER, filename)
+    abs_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
     try:
         if os.path.exists(abs_path) and os.path.isfile(abs_path):
             os.remove(abs_path)
     except Exception as e:
         print(f"Failed to delete orphaned file {abs_path}: {e}")
+
+
+def delete_file_if_unreferenced(file_path):
+    if not file_path:
+        return
+    referenced = Upload.query.filter(
+        (Upload.file_path == file_path) | (Upload.thumbnail_path == file_path)
+    ).first() or Flag.query.filter(
+        (Flag.file_path == file_path) | (Flag.thumbnail_path == file_path)
+    ).first()
+    if not referenced:
+        delete_file_safe(file_path)
+
+
+def delete_upload_records_before_flags(uploads):
+    uploads = list(uploads)
+    for upload in uploads:
+        upload.flag_id = None
+    if uploads:
+        db.session.flush()
 
 # --- Admin Routes ---
 @main.route('/admin/login', methods=['GET', 'POST'])
@@ -74,7 +152,7 @@ def admin_login():
     if request.method == 'POST':
         password = request.form.get('password')
         admin = Admin.query.first()
-        if admin and admin.check_password(password):
+        if password and admin and admin.check_password(password):
             session['admin_logged_in'] = True
             return redirect(url_for('main.admin_classroom'))
         flash('Invalid password')
@@ -106,6 +184,8 @@ def create_class():
     
     name = request.form.get('name')
     class_type = request.form.get('class_type', 'classmap')
+    if class_type not in CLASS_TYPES:
+        abort(400, description='Invalid class type.')
     
     if not name:
         name = f"Class {datetime.now().strftime('%Y-%m-%d %H:%M')}"
@@ -118,7 +198,7 @@ def create_class():
 def close_class(class_id):
     if not session.get('admin_logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
-    c = ClassGroup.query.get_or_404(class_id)
+    c = db.get_or_404(ClassGroup, class_id)
     c.is_active = False
     # 세션까지 함께 닫아야 한다 — 그렇지 않으면 클래스는 닫혔어도 자식 세션은 is_active=True로
     # 남아, view_session/소켓 쓰기/첨부파일 다운로드가 여전히 세션의 is_active만 검사하므로
@@ -132,18 +212,24 @@ def close_class(class_id):
 def delete_class(class_id):
     if not session.get('admin_logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
-    c = ClassGroup.query.get_or_404(class_id)
+    c = db.get_or_404(ClassGroup, class_id)
     class_type = c.class_type
     class_name = c.name  # 삭제 후 접근 방지 위해 미리 캡처
 
-    # Safely clean up associated uploaded files from disk
+    files_to_delete = set()
+    uploads_to_delete = []
     for s in c.sessions:
+        for upload in s.uploads:
+            files_to_delete.update((upload.file_path, upload.thumbnail_path))
+            uploads_to_delete.append(upload)
         for f in s.flags:
-            delete_file_safe(f.file_path)
-            delete_file_safe(f.thumbnail_path)
+            files_to_delete.update((f.file_path, f.thumbnail_path))
 
+    delete_upload_records_before_flags(uploads_to_delete)
     db.session.delete(c)
     db.session.commit()
+    for file_path in files_to_delete:
+        delete_file_if_unreferenced(file_path)
     flash(f"Class '{class_name}' has been successfully deleted.")
     return redirect(url_for('main.admin_dashboard', type=class_type))
 
@@ -151,7 +237,7 @@ def delete_class(class_id):
 def admin_class(class_id):
     if not session.get('admin_logged_in'):
         return redirect(url_for('main.admin_login'))
-    c = ClassGroup.query.get_or_404(class_id)
+    c = db.get_or_404(ClassGroup, class_id)
     active_sessions = Session.query.filter_by(class_id=class_id, is_active=True).all()
     past_sessions = Session.query.filter_by(class_id=class_id, is_active=False).all()
     return render_template('admin_class.html', class_group=c, active_sessions=active_sessions, past_sessions=past_sessions)
@@ -161,7 +247,9 @@ def create_session(class_id):
     if not session.get('admin_logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
     
-    c = ClassGroup.query.get_or_404(class_id)
+    c = db.get_or_404(ClassGroup, class_id)
+    if not c.is_active:
+        abort(409, description='Cannot create a session in a closed class.')
     name = request.form.get('name')
     if not name:
         name = f"Session {datetime.now().strftime('%Y-%m-%d %H:%M')}"
@@ -174,7 +262,7 @@ def create_session(class_id):
 def close_session(session_id):
     if not session.get('admin_logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
-    s = Session.query.get_or_404(session_id)
+    s = db.get_or_404(Session, session_id)
     s.is_active = False
     db.session.commit()
     return redirect(url_for('main.admin_class', class_id=s.class_id))
@@ -183,17 +271,21 @@ def close_session(session_id):
 def delete_session(session_id):
     if not session.get('admin_logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
-    s = Session.query.get_or_404(session_id)
+    s = db.get_or_404(Session, session_id)
     class_id = s.class_id
     session_name = s.name  # 삭제 후 접근 방지 위해 미리 캡처
 
-    # Safely clean up associated uploaded files from disk
+    files_to_delete = set()
+    for upload in s.uploads:
+        files_to_delete.update((upload.file_path, upload.thumbnail_path))
     for f in s.flags:
-        delete_file_safe(f.file_path)
-        delete_file_safe(f.thumbnail_path)
+        files_to_delete.update((f.file_path, f.thumbnail_path))
 
+    delete_upload_records_before_flags(s.uploads)
     db.session.delete(s)
     db.session.commit()
+    for file_path in files_to_delete:
+        delete_file_if_unreferenced(file_path)
     flash(f"Session '{session_name}' has been successfully deleted.")
     return redirect(url_for('main.admin_class', class_id=class_id))
 
@@ -201,7 +293,7 @@ def delete_session(session_id):
 def admin_class_quiz_results(class_id):
     if not session.get('admin_logged_in'):
         return redirect(url_for('main.admin_login'))
-    c = ClassGroup.query.get_or_404(class_id)
+    c = db.get_or_404(ClassGroup, class_id)
     sessions = Session.query.filter_by(class_id=class_id).all()
     return render_template('class_quiz_results.html', class_group=c, sessions=sessions)
 
@@ -224,8 +316,8 @@ def change_password():
         flash('현재 비밀번호가 올바르지 않습니다.')
         return redirect(url_for('main.admin_settings'))
 
-    if not new_password:
-        flash('새 비밀번호를 입력하세요.')
+    if not new_password or len(new_password) < 10:
+        flash('새 비밀번호는 10자 이상이어야 합니다.')
         return redirect(url_for('main.admin_settings'))
 
     admin.set_password(new_password)
@@ -241,6 +333,7 @@ def reset_data():
     import shutil
     # 벌크 delete()는 ORM cascade를 타지 않으므로, 자식 테이블부터 명시적으로 모두 삭제한다.
     # (이전 코드는 QuizQuestion/QuizResponse를 누락해 고아 레코드가 남았음)
+    db.session.query(Upload).delete()
     db.session.query(QuizResponse).delete()
     db.session.query(QuizQuestion).delete()
     db.session.query(Flag).delete()
@@ -248,9 +341,10 @@ def reset_data():
     db.session.query(ClassGroup).delete()
     db.session.commit()
     
-    if os.path.exists(Config.UPLOAD_FOLDER):
-        for filename in os.listdir(Config.UPLOAD_FOLDER):
-            file_path = os.path.join(Config.UPLOAD_FOLDER, filename)
+    upload_folder = current_app.config['UPLOAD_FOLDER']
+    if os.path.exists(upload_folder):
+        for filename in os.listdir(upload_folder):
+            file_path = os.path.join(upload_folder, filename)
             try:
                 if os.path.isfile(file_path) or os.path.islink(file_path):
                     os.unlink(file_path)
@@ -301,7 +395,7 @@ def export_markdown():
                     if f.file_path:
                         md_content += f"**Attached File:** {f.file_path}\n"
                         attachment_name = os.path.basename(f.file_path)
-                        attachment_path = os.path.join(Config.UPLOAD_FOLDER, attachment_name)
+                        attachment_path = os.path.join(current_app.config['UPLOAD_FOLDER'], attachment_name)
                         if os.path.isfile(attachment_path):
                             attachment_zip_path = os.path.join(class_folder, session_folder, 'attachments', attachment_name)
                             zf.write(attachment_path, attachment_zip_path)
@@ -338,7 +432,18 @@ def classgame():
 def classgame_files(game_id, filename=None):
     game = _get_game_or_404(game_id)
     filename = filename or game['entry']
-    return send_from_directory(game['folder'], filename)
+    public_filename = _public_game_filename(game, filename)
+    if not public_filename:
+        abort(404)
+
+    root = os.path.realpath(game['folder'])
+    target = os.path.realpath(os.path.join(root, *PurePosixPath(public_filename).parts))
+    try:
+        if os.path.commonpath((root, target)) != root or not os.path.isfile(target):
+            abort(404)
+    except ValueError:
+        abort(404)
+    return send_from_directory(root, public_filename)
 
 @main.route('/admin/classroom')
 def admin_classroom():
@@ -358,7 +463,7 @@ def classes():
 
 @main.route('/class/<class_id>')
 def view_class(class_id):
-    c = ClassGroup.query.get_or_404(class_id)
+    c = db.get_or_404(ClassGroup, class_id)
     if not c.is_active and not session.get('admin_logged_in'):
         return "This class is closed.", 403
     active_sessions = Session.query.filter_by(class_id=class_id, is_active=True).all()
@@ -367,8 +472,8 @@ def view_class(class_id):
 
 @main.route('/session/<session_id>')
 def view_session(session_id):
-    s = Session.query.get_or_404(session_id)
-    if not s.is_active and not session.get('admin_logged_in'):
+    s = db.get_or_404(Session, session_id)
+    if not s.is_open and not session.get('admin_logged_in'):
         return "This session is closed.", 403
 
     is_admin = session.get('admin_logged_in', False)
@@ -393,7 +498,7 @@ def export_quiz_excel(session_id):
     
     from openpyxl import Workbook
 
-    s = Session.query.get_or_404(session_id)
+    s = db.get_or_404(Session, session_id)
     questions = QuizQuestion.query.filter_by(session_id=session_id).order_by(QuizQuestion.index).all()
     
     wb = Workbook()
@@ -425,6 +530,10 @@ def export_quiz_excel(session_id):
 def import_quiz_excel(session_id):
     if not session.get('admin_logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
+
+    quiz_session = db.get_or_404(Session, session_id)
+    if quiz_session.class_group.class_type != 'classquiz':
+        abort(400, description='Quiz imports require a ClassQuiz session.')
     
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
@@ -434,14 +543,33 @@ def import_quiz_excel(session_id):
         return jsonify({'error': 'No selected file'}), 400
     
     from openpyxl import load_workbook
+    from openpyxl.utils.exceptions import InvalidFileException
 
     try:
         wb = load_workbook(file)
         ws = wb.active
         imported_questions = []
+        quiz_uploads = Upload.query.filter_by(
+            session_id=session_id,
+            purpose='quiz',
+        ).all()
+        files_to_delete = {
+            path
+            for upload in quiz_uploads
+            for path in (upload.file_path, upload.thumbnail_path)
+            if path
+        }
 
         # 기존 문제를 새 파일로 "동기화"(교체)한다.
         # 교체될 문제에 달린 응답이 고아로 남지 않도록 먼저 삭제한다.
+        for upload in quiz_uploads:
+            upload.question_id = None
+        if quiz_uploads:
+            db.session.flush()
+        for upload in quiz_uploads:
+            db.session.delete(upload)
+        if quiz_uploads:
+            db.session.flush()
         QuizResponse.query.filter_by(session_id=session_id).delete()
         QuizQuestion.query.filter_by(session_id=session_id).delete()
 
@@ -480,13 +608,39 @@ def import_quiz_excel(session_id):
             db.session.add(q)
 
         db.session.commit()
+        for file_path in files_to_delete:
+            delete_file_if_unreferenced(file_path)
         return jsonify({'success': True})
+    except (ValueError, TypeError, zipfile.BadZipFile, InvalidFileException) as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 @main.route('/upload', methods=['POST'])
 def upload_file():
+    session_id = request.form.get('session_id')
+    purpose = request.form.get('purpose', 'flag')
+    target_session = db.session.get(Session, session_id) if session_id else None
+    if not target_session:
+        return jsonify({'error': 'A valid session is required'}), 400
+
+    is_admin = session.get('admin_logged_in', False)
+    owner_id = session.get('participant_id') or ('admin' if is_admin else None)
+    if purpose == 'quiz':
+        if not is_admin or target_session.class_group.class_type != 'classquiz':
+            return jsonify({'error': 'Unauthorized upload purpose'}), 403
+    elif purpose == 'flag':
+        if target_session.class_group.class_type == 'classquiz':
+            return jsonify({'error': 'Invalid upload purpose for this session'}), 400
+        if not is_admin and not target_session.is_open:
+            return jsonify({'error': 'This session is closed'}), 403
+        if not owner_id:
+            return jsonify({'error': 'Open the session before uploading'}), 403
+    else:
+        return jsonify({'error': 'Invalid upload purpose'}), 400
+
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
     file = request.files['file']
@@ -494,30 +648,57 @@ def upload_file():
         return jsonify({'error': 'No selected file'}), 400
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
+        extension = filename.rsplit('.', 1)[1].lower()
+        if purpose == 'quiz' and extension not in {'png', 'jpg', 'jpeg', 'gif'}:
+            return jsonify({'error': 'Quiz uploads must be images'}), 400
         unique_filename = f"{uuid.uuid4().hex}_{filename}"
-        filepath = os.path.join(Config.UPLOAD_FOLDER, unique_filename)
+        upload_folder = current_app.config['UPLOAD_FOLDER']
+        filepath = os.path.join(upload_folder, unique_filename)
         
         # Ensure upload dir exists
-        os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
+        os.makedirs(upload_folder, exist_ok=True)
         file.save(filepath)
         
         # Create thumbnail if image
         thumbnail_path = None
-        if filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'gif'}:
+        if extension in {'png', 'jpg', 'jpeg', 'gif'}:
+            thumb_filename = f"thumb_{unique_filename}"
+            thumb_filepath = os.path.join(upload_folder, thumb_filename)
             try:
-                # with 블록으로 파일 핸들 누수 방지
+                with Image.open(filepath) as img:
+                    img.verify()
                 with Image.open(filepath) as img:
                     img.thumbnail((150, 150))
-                    thumb_filename = f"thumb_{unique_filename}"
-                    thumb_filepath = os.path.join(Config.UPLOAD_FOLDER, thumb_filename)
                     img.save(thumb_filepath)
                 thumbnail_path = f"uploads/{thumb_filename}"
             except Exception as e:
+                if os.path.isfile(thumb_filepath):
+                    os.remove(thumb_filepath)
+                if purpose == 'quiz':
+                    delete_file_safe(f"uploads/{unique_filename}")
+                    return jsonify({'error': 'Invalid image file'}), 400
                 print(f"Error creating thumbnail: {e}")
                 
+        file_path = f"uploads/{unique_filename}"
+        upload = Upload(
+            session_id=target_session.id,
+            owner_id=owner_id,
+            purpose=purpose,
+            file_path=file_path,
+            thumbnail_path=thumbnail_path,
+        )
+        db.session.add(upload)
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            delete_file_safe(file_path)
+            delete_file_safe(thumbnail_path)
+            return jsonify({'error': 'Could not register upload'}), 500
+
         return jsonify({
-            'success': True, 
-            'file_path': f"uploads/{unique_filename}",
+            'success': True,
+            'file_path': file_path,
             'thumbnail_path': thumbnail_path
         })
     return jsonify({'error': 'Invalid file type'}), 400

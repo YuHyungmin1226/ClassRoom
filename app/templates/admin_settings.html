@@ -21,7 +21,7 @@
             </div>
             <div class="form-group" style="margin-bottom: 25px;">
                 <label for="new_password" style="display: block; margin-bottom: 8px; font-weight: 500; color: #475569;">New Password</label>
-                <input type="password" id="new_password" name="new_password" class="form-control" placeholder="Enter a strong new password" style="width: 100%; box-sizing: border-box;" autocomplete="new-password" required>
+                <input type="password" id="new_password" name="new_password" class="form-control" placeholder="Enter at least 10 characters" style="width: 100%; box-sizing: border-box;" autocomplete="new-password" minlength="10" required>
             </div>
             <div style="display: flex; justify-content: flex-end; gap: 12px; align-items: stretch;">
                 <a href="{{ url_for('main.admin_classroom') }}" class="btn btn-secondary" style="text-decoration: none; display: flex; align-items: center; justify-content: center; margin: 0;">Cancel</a>

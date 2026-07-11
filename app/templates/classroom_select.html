@@ -9,7 +9,7 @@
 
     <div class="selection-grid">
         <!-- Classmap Option -->
-        <div class="selection-card" onclick="goToDashboard('classmap')">
+        <a class="selection-card" href="{{ url_for('main.admin_dashboard', type='classmap') if is_admin else url_for('main.classes', type='classmap') }}">
             <div class="card-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M3 7V17C3 18.1046 3.89543 19 5 19H19C20.1046 19 21 18.1046 21 17V7C21 5.89543 20.1046 5 19 5H5C3.89543 5 3 5.89543 3 7Z" />
@@ -20,10 +20,10 @@
             <h3>ClassMap</h3>
             <p>지도를 기반으로 장소와 연계된<br>정보를 공유하는 클래스</p>
             <div class="select-badge">입장하기</div>
-        </div>
+        </a>
 
         <!-- ClassWrite Option -->
-        <div class="selection-card" onclick="goToDashboard('classwrite')">
+        <a class="selection-card" href="{{ url_for('main.admin_dashboard', type='classwrite') if is_admin else url_for('main.classes', type='classwrite') }}">
             <div class="card-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M11 4H4C3.46957 4 2.96086 4.21071 2.58579 4.58579C2.21071 4.96086 2 5.46957 2 6V20C2 20.5304 2.21071 21.0391 2.58579 21.4142C2.96086 21.7893 3.46957 22 4 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V13" />
@@ -33,10 +33,10 @@
             <h3>ClassWrite</h3>
             <p>게시글을 작성하고 의견을 나누는<br>게시판형 클래스</p>
             <div class="select-badge">입장하기</div>
-        </div>
+        </a>
 
         <!-- ClassDraw Option -->
-        <div class="selection-card" onclick="goToDashboard('classdraw')">
+        <a class="selection-card" href="{{ url_for('main.admin_dashboard', type='classdraw') if is_admin else url_for('main.classes', type='classdraw') }}">
             <div class="card-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 19l7-7 3 3-7 7-3-3z" />
@@ -48,10 +48,10 @@
             <h3>ClassDraw</h3>
             <p>실시간으로 함께 그림을 그리며<br>생각을 시각화하는 드로잉 클래스</p>
             <div class="select-badge">입장하기</div>
-        </div>
+        </a>
 
         <!-- ClassQuiz Option -->
-        <div class="selection-card" onclick="goToDashboard('classquiz')">
+        <a class="selection-card" href="{{ url_for('main.admin_dashboard', type='classquiz') if is_admin else url_for('main.classes', type='classquiz') }}">
             <div class="card-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M9 11L12 14L22 4" />
@@ -64,10 +64,10 @@
             <h3>ClassQuiz</h3>
             <p>문제를 풀고 실시간으로<br>학습 결과를 확인하는 퀴즈 클래스</p>
             <div class="select-badge">입장하기</div>
-        </div>
+        </a>
 
         <!-- ClassGame Option -->
-        <div class="selection-card" onclick="goToClassGame()">
+        <a class="selection-card" href="{{ url_for('main.classgame') }}">
             <div class="card-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M6 12H10" />
@@ -80,13 +80,7 @@
             <h3>ClassGame</h3>
             <p>수업에서 바로 실행할 수 있는<br>게임 라이브러리</p>
             <div class="select-badge">게임 선택</div>
-        </div>
-    </div>
-    <div id="selection-config" 
-         data-is-admin="{{ 'true' if is_admin else 'false' }}" 
-         data-admin-url="{{ url_for('main.admin_dashboard') }}" 
-         data-classes-url="{{ url_for('main.classes') }}"
-         data-classgame-url="{{ url_for('main.classgame') }}">
+        </a>
     </div>
 </div>
 
@@ -116,14 +110,14 @@
 
 .selection-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
     gap: 30px;
     margin-top: 20px;
 }
 
 .selection-card {
     background: white;
-    border-radius: 24px;
+    border-radius: 8px;
     padding: 40px 30px;
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -131,19 +125,22 @@
     box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
     position: relative;
     overflow: hidden;
+    text-decoration: none;
 }
 
-.selection-card:hover {
+.selection-card:hover,
+.selection-card:focus-visible {
     transform: translateY(-10px);
     border-color: #6366f1;
     box-shadow: 0 20px 35px -10px rgba(99, 102, 241, 0.2);
+    outline: none;
 }
 
 .card-icon {
     width: 80px;
     height: 80px;
     background: #f1f5f9;
-    border-radius: 20px;
+    border-radius: 8px;
     margin: 0 auto 24px;
     display: flex;
     align-items: center;
@@ -152,7 +149,8 @@
     transition: all 0.3s ease;
 }
 
-.selection-card:hover .card-icon {
+.selection-card:hover .card-icon,
+.selection-card:focus-visible .card-icon {
     background: #6366f1;
     color: white;
 }
@@ -185,23 +183,4 @@
     transition: all 0.3s ease;
 }
 </style>
-
-<script>
-function goToDashboard(type) {
-    const config = document.getElementById('selection-config').dataset;
-    const isAdmin = config.isAdmin === 'true';
-    let url;
-    if (isAdmin) {
-        url = config.adminUrl + "?type=" + type;
-    } else {
-        url = config.classesUrl + "?type=" + type;
-    }
-    location.href = url;
-}
-
-function goToClassGame() {
-    const config = document.getElementById('selection-config').dataset;
-    location.href = config.classgameUrl;
-}
-</script>
 {% endblock %}

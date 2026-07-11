@@ -12,7 +12,7 @@ Classroom Portal is a real-time classroom collaboration platform for teachers an
 
 - **Real-time collaboration** through Flask-SocketIO
 - **Class and session management** for active and archived classroom activities
-- **Media upload** for images, videos, documents, and HTML files
+- **Media upload** for images, videos, and documents
 - **YouTube embedding** from pasted links
 - **Quiz Excel import/export** for bulk question management
 - **Markdown ZIP export** with post content and attached files
@@ -31,7 +31,7 @@ Classroom Portal is a real-time classroom collaboration platform for teachers an
 
 Double-click `start_windows.bat`.
 
-The launcher creates or reuses the bundled `python_portable` runtime, verifies required modules, installs missing dependencies, clears port `5555`, and starts the server.
+The launcher downloads or reuses a local `python_portable` runtime, verifies required modules, installs missing dependencies, checks that port `5555` is available, and starts the server. It never terminates another process using that port.
 
 ### macOS / Linux
 
@@ -46,6 +46,20 @@ python run.py
 
 Open `http://localhost:5555` on the host computer. Share one of the printed `http://<local-ip>:5555` network URLs with students on the same Wi-Fi.
 
+## ClassGame Setup
+
+ClassGame looks for DIALIKE in the `dialike` folder next to the `ClassRoom` repository. The default workspace layout is:
+
+```text
+CodeSpace/
+|-- ClassRoom/
+`-- dialike/
+```
+
+Set `CLASSGAME_DIALIKE_PATH` to an absolute folder path before startup to use a different location. Only registered runtime files (`index.html`, `style.css`, JavaScript, and image assets) are served; repository metadata, tests, and documentation remain private.
+
+DIALIKE currently targets keyboard and mouse input. Starting a game requests browser fullscreen from the user's click. If the browser denies fullscreen, the game still fills the current browser viewport.
+
 ## Admin Password
 
 On first startup, the app creates an admin account. If `ADMIN_PASSWORD` is set in the environment, that value is used. Otherwise, a one-time random password is printed in the server console. Change it immediately from **Admin Settings** after logging in.
@@ -59,6 +73,14 @@ python migrate_db.py
 ```
 
 The migration script backs up `instance/app.db` before applying schema updates.
+
+## Tests
+
+Run the backend, Socket.IO, ClassGame, and migration regression suite with:
+
+```bash
+python -m unittest discover -s tests -p "test_*.py" -v
+```
 
 ## License
 

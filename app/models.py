@@ -5,7 +5,7 @@ from datetime import datetime
 
 class Admin(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    password_hash = db.Column(db.String(128))
+    password_hash = db.Column(db.String(255), nullable=False)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -32,6 +32,16 @@ class Session(db.Model):
     flags = db.relationship('Flag', backref='session', lazy=True, cascade='all, delete-orphan')
     quiz_questions = db.relationship('QuizQuestion', backref='session', lazy=True, cascade='all, delete-orphan')
     quiz_responses = db.relationship('QuizResponse', backref='session', lazy=True, cascade='all, delete-orphan')
+    uploads = db.relationship('Upload', backref='session', lazy=True, cascade='all, delete-orphan')
+
+    @property
+    def is_open(self):
+        """Whether participants may enter or write to this session."""
+        return bool(
+            self.is_active
+            and self.class_group
+            and self.class_group.is_active
+        )
 
 class Flag(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -46,6 +56,23 @@ class Flag(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     author_name = db.Column(db.String(100), nullable=False, default="Participant")
     post_type = db.Column(db.String(20), nullable=False, default='normal') # 'normal', 'notice', 'objective'
+
+
+class Upload(db.Model):
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = db.Column(db.String(36), db.ForeignKey('session.id'), nullable=False)
+    owner_id = db.Column(db.String(100), nullable=False)
+    purpose = db.Column(db.String(20), nullable=False, default='flag')
+    file_path = db.Column(db.String(255), nullable=False, unique=True)
+    thumbnail_path = db.Column(db.String(255), nullable=True, unique=True)
+    flag_id = db.Column(db.Integer, db.ForeignKey('flag.id'), nullable=True, unique=True)
+    question_id = db.Column(
+        db.Integer,
+        db.ForeignKey('quiz_question.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 class QuizQuestion(db.Model):
     id = db.Column(db.Integer, primary_key=True)

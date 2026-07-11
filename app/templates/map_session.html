@@ -521,9 +521,9 @@
                 placeholder="Share your thoughts or paste a YouTube link..."></textarea>
         </div>
         <div class="form-group">
-            <label style="font-size: 0.9rem; color: #64748b; display: block; margin-bottom: 5px;">Attach File (Image, Video, Document, HTML)</label>
+            <label style="font-size: 0.9rem; color: #64748b; display: block; margin-bottom: 5px;">Attach File (Image, Video, Document)</label>
             <input type="file" id="inlinefileInput" class="form-control"
-                accept="image/*,video/*,.pdf,.txt,.docx,.html,.htm">
+                accept="image/*,video/*,.pdf,.txt,.docx">
         </div>
 
         <!-- Live Preview Container -->
@@ -576,7 +576,7 @@
             <div class="form-group">
                 <label>Attach File (Optional, replaces existing if editing)</label>
                 <input type="file" id="fileInput" class="form-control"
-                    accept="image/*,video/*,.pdf,.txt,.docx,.html,.htm">
+                    accept="image/*,video/*,.pdf,.txt,.docx">
             </div>
 
             <!-- Live Preview Container -->
@@ -1443,6 +1443,8 @@
         if (fileInput.files.length > 0) {
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
+            formData.append('session_id', sessionId);
+            formData.append('purpose', 'flag');
 
             try {
                 const response = await fetch('/upload', {
@@ -1541,8 +1543,9 @@
         function startDrawing(e) {
             drawing = true;
             const rect = canvas.getBoundingClientRect();
-            const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-            const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+            const clientX = e.clientX ?? e.touches?.[0]?.clientX;
+            const clientY = e.clientY ?? e.touches?.[0]?.clientY;
+            if (clientX === undefined || clientY === undefined) return;
             lastX = clientX - rect.left;
             lastY = clientY - rect.top;
         }
@@ -1555,8 +1558,9 @@
             if (!drawing) return;
 
             const rect = canvas.getBoundingClientRect();
-            const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-            const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+            const clientX = e.clientX ?? e.touches?.[0]?.clientX;
+            const clientY = e.clientY ?? e.touches?.[0]?.clientY;
+            if (clientX === undefined || clientY === undefined) return;
             const x = clientX - rect.left;
             const y = clientY - rect.top;
 
