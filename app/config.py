@@ -66,7 +66,14 @@ class Config:
         {'connect_args': {'check_same_thread': False}}
         if SQLALCHEMY_DATABASE_URI.startswith('sqlite') else {}
     )
-    UPLOAD_FOLDER = os.path.join(basedir, 'app', 'static', 'uploads')
+    UPLOAD_FOLDER = os.path.abspath(os.environ.get(
+        'CLASSROOM_UPLOAD_FOLDER',
+        os.path.join(basedir, 'instance', 'uploads'),
+    ))
+    LEGACY_UPLOAD_FOLDER = os.path.abspath(os.environ.get(
+        'CLASSROOM_LEGACY_UPLOAD_FOLDER',
+        os.path.join(basedir, 'app', 'static', 'uploads'),
+    ))
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB limit
     ALLOWED_ORIGINS = _allowed_origins()
     # 세션 쿠키 보안 강화 (CSRF 완화에 도움)

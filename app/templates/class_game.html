@@ -170,8 +170,12 @@
 .game-stage {
     background: #030712;
     display: none;
+    height: 100vh;
+    height: 100dvh;
     inset: 0;
     position: fixed;
+    width: 100vw;
+    width: 100dvw;
     z-index: 1000;
 }
 
@@ -183,8 +187,8 @@
     background: #050505;
     border: 0;
     display: block;
-    height: 100vh;
-    width: 100vw;
+    height: 100%;
+    width: 100%;
 }
 
 .game-stage-toolbar {
@@ -288,6 +292,19 @@ body.classgame-playing {
     const navbar = document.querySelector('.navbar');
     let previousFocus = null;
 
+    function currentFullscreenElement() {
+        return document.fullscreenElement || document.webkitFullscreenElement || null;
+    }
+
+    function syncFullscreenButton() {
+        fullscreenButton.textContent = currentFullscreenElement() === stage ? '전체화면 해제' : '전체화면';
+    }
+
+    function handleFullscreenChange() {
+        syncFullscreenButton();
+        if (currentFullscreenElement() === stage) setFullscreenStatus('');
+    }
+
     function setFullscreenStatus(message) {
         fullscreenStatus.textContent = message || '';
         fullscreenStatus.classList.toggle('visible', Boolean(message));
@@ -297,17 +314,33 @@ body.classgame-playing {
         const request = stage.requestFullscreen || stage.webkitRequestFullscreen;
         if (!request) {
             setFullscreenStatus('브라우저 전체화면을 지원하지 않아 현재 창에 맞춰 실행합니다.');
+            syncFullscreenButton();
             return;
         }
         try {
             const result = request.call(stage);
-            if (result && typeof result.catch === 'function') {
-                result.catch(function () {
+            if (result && typeof result.then === 'function') {
+                result.then(function () {
+                    syncFullscreenButton();
+                    if (currentFullscreenElement() === stage) setFullscreenStatus('');
+                }, function () {
+                    syncFullscreenButton();
                     setFullscreenStatus('전체화면을 시작할 수 없어 현재 창에 맞춰 실행합니다.');
                 });
             }
         } catch (error) {
+            syncFullscreenButton();
             setFullscreenStatus('전체화면을 시작할 수 없어 현재 창에 맞춰 실행합니다.');
+        }
+        window.setTimeout(syncFullscreenButton, 250);
+    }
+
+    function exitStageFullscreen() {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (!exit || currentFullscreenElement() !== stage) return;
+        const result = exit.call(document);
+        if (result && typeof result.catch === 'function') {
+            result.catch(function () {});
         }
     }
 
@@ -329,8 +362,8 @@ body.classgame-playing {
         library.setAttribute('inert', '');
         if (navbar) navbar.setAttribute('inert', '');
         setFullscreenStatus('');
-        requestStageFullscreen();
         frame.src = playUrl;
+        requestStageFullscreen();
         window.setTimeout(focusGameFrame, 250);
     }
 
@@ -342,12 +375,8 @@ body.classgame-playing {
         library.removeAttribute('inert');
         if (navbar) navbar.removeAttribute('inert');
         setFullscreenStatus('');
-        if (document.fullscreenElement && document.exitFullscreen) {
-            const result = document.exitFullscreen();
-            if (result && typeof result.catch === 'function') {
-                result.catch(function () {});
-            }
-        }
+        exitStageFullscreen();
+        syncFullscreenButton();
         if (previousFocus && typeof previousFocus.focus === 'function') {
             previousFocus.focus();
         }
@@ -362,25 +391,25 @@ body.classgame-playing {
     frame.addEventListener('load', focusGameFrame);
     exitButton.addEventListener('click', closeGame);
     fullscreenButton.addEventListener('click', function () {
-        if (document.fullscreenElement === stage && document.exitFullscreen) {
-            const result = document.exitFullscreen();
-            if (result && typeof result.catch === 'function') {
-                result.catch(function () {});
-            }
+        if (currentFullscreenElement() === stage) {
+            exitStageFullscreen();
         } else {
             requestStageFullscreen();
         }
         focusGameFrame();
     });
-    document.addEventListener('fullscreenchange', function () {
-        fullscreenButton.textContent = document.fullscreenElement === stage ? '전체화면 해제' : '전체화면';
-        if (document.fullscreenElement === stage) setFullscreenStatus('');
-    });
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.addEventListener('fullscreenerror', function () {
+        syncFullscreenButton();
+        setFullscreenStatus('전체화면을 시작할 수 없어 현재 창에 맞춰 실행합니다.');
+    });
+    document.addEventListener('webkitfullscreenerror', function () {
+        syncFullscreenButton();
         setFullscreenStatus('전체화면을 시작할 수 없어 현재 창에 맞춰 실행합니다.');
     });
     document.addEventListener('keydown', function (event) {
-        if (event.key === 'Escape' && stage.classList.contains('active') && !document.fullscreenElement) {
+        if (event.key === 'Escape' && stage.classList.contains('active') && !currentFullscreenElement()) {
             closeGame();
         }
     });

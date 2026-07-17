@@ -64,6 +64,8 @@ DIALIKE currently targets keyboard and mouse input. Starting a game requests bro
 
 On first startup, the app creates an admin account. If `ADMIN_PASSWORD` is set in the environment, that value is used. Otherwise, a one-time random password is printed in the server console. Change it immediately from **Admin Settings** after logging in.
 
+If the password is lost, stop the server and run `python run.py --reset-admin-password`. The command resets the administrator password to `ADMIN_PASSWORD` when that environment variable is set, or generates and prints a new random password otherwise. It exits without starting the web server.
+
 ## Maintenance
 
 For existing SQLite databases from older versions, stop the running server first, then run:
@@ -73,6 +75,10 @@ python migrate_db.py
 ```
 
 The migration script backs up `instance/app.db` before applying schema updates.
+
+Uploaded attachments are stored privately under `instance/uploads` and are served only through the access-controlled `/uploads/<filename>` route. On the first startup after upgrading, files from the legacy `app/static/uploads` folder are moved automatically. Name collisions or unsupported entries are retained outside the static tree under `instance/upload-quarantine` for manual review.
+
+Deployments that keep runtime data elsewhere can set `CLASSROOM_UPLOAD_FOLDER` and `CLASSROOM_LEGACY_UPLOAD_FOLDER` to absolute paths before startup. The legacy folder must remain separate from the active upload folder.
 
 ## Tests
 

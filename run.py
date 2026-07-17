@@ -4,6 +4,13 @@ import signal
 import warnings
 import logging
 import socket
+import secrets
+
+RESET_PASSWORD_FLAG = '--reset-admin-password'
+reset_password_value = None
+if RESET_PASSWORD_FLAG in sys.argv:
+    reset_password_value = os.environ.get('ADMIN_PASSWORD') or secrets.token_urlsafe(12)
+    os.environ['ADMIN_PASSWORD'] = reset_password_value
 
 warnings.filterwarnings(
     "ignore",
@@ -40,7 +47,30 @@ def get_all_local_ips():
 
 app = create_app()
 
+
+def reset_admin_password(password):
+    from app import db
+    from app.models import Admin
+
+    with app.app_context():
+        admin = Admin.query.first()
+        if not admin:
+            admin = Admin(id=1)
+            db.session.add(admin)
+        admin.set_password(password)
+        db.session.commit()
+
+    print('=' * 60)
+    print(f"[Security] New admin password: {password}")
+    print('Log in and change it immediately from Admin Settings.')
+    print('=' * 60)
+
+
 if __name__ == '__main__':
+    if reset_password_value:
+        reset_admin_password(reset_password_value)
+        raise SystemExit(0)
+
     debug = os.environ.get('FLASK_DEBUG', '').lower() in ('true', '1', 'yes')
 
     # Print the banner once. In debug mode the reloader spawns a child process
