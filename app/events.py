@@ -99,6 +99,23 @@ def _delete_upload_files_if_unreferenced(paths):
             _delete_upload_file(rel_path)
 
 
+def _grade_response(q, response_text):
+    """문제 유형/정답 기준으로 응답 채점. submit 시점과 재채점(edit 후) 모두에서 사용."""
+    if q.q_type == 'long':
+        return bool(response_text and response_text.strip())
+    if q.q_type == 'choice':
+        # correct_answer가 비어있으면(문제 설정 미비) 무조건 오답 처리 —
+        # 가드가 없으면 양쪽 다 빈 리스트로 평가되어 아무 응답이나 정답으로 채점된다.
+        if q.correct_answer:
+            return _choice_answer_values(q, response_text) == _choice_answer_values(q, q.correct_answer)
+        return False
+    if q.q_type == 'short':
+        if q.correct_answer:
+            return _normalize_answer(response_text) == _normalize_answer(q.correct_answer)
+        return False
+    return False
+
+
 def _question_payload(data, current=None):
     try:
         index = int(data.get('index', current.index if current else None))
@@ -619,6 +636,10 @@ def on_edit_quiz_question(data):
         for field, value in values.items():
             setattr(q, field, value)
         files_to_delete = _sync_quiz_uploads(q)
+        # 정답/보기/유형이 바뀌면 이미 채점된 기존 응답이 옛 기준으로 남아
+        # 관리자/학생 화면에 잘못 표시되므로 재채점한다.
+        for resp in QuizResponse.query.filter_by(question_id=q.id).all():
+            resp.is_correct = _grade_response(q, resp.response)
         try:
             db.session.commit()
         except SQLAlchemyError as error:
@@ -688,21 +709,10 @@ def on_submit_quiz_response(data):
         return
     response_text = response_text[:10000]
 
-    # Grading logic
-    is_correct = False
     if q.session_id != session_id:
         return
 
-    if q.q_type == 'long':
-        is_correct = bool(response_text and response_text.strip())
-    elif q.q_type == 'choice':
-        # correct_answer가 비어있으면(문제 설정 미비) 무조건 오답 처리 —
-        # 가드가 없으면 양쪽 다 빈 리스트로 평가되어 아무 응답이나 정답으로 채점된다.
-        if q.correct_answer:
-            is_correct = _choice_answer_values(q, response_text) == _choice_answer_values(q, q.correct_answer)
-    elif q.q_type == 'short':
-        if q.correct_answer:
-            is_correct = (_normalize_answer(response_text) == _normalize_answer(q.correct_answer))
+    is_correct = _grade_response(q, response_text)
 
     try:
         # Check for existing response by this client for this question

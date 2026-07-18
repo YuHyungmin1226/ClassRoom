@@ -648,6 +648,10 @@ def upload_file():
         return jsonify({'error': 'No selected file'}), 400
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
+        # secure_filename()은 이름이 특수문자/점으로만 이루어진 파일(예: ".png", "!.png")의
+        # 확장자를 통째로 제거할 수 있어, 정제 후 확장자가 사라지면 400으로 거부한다.
+        if '.' not in filename:
+            return jsonify({'error': 'Invalid filename'}), 400
         extension = filename.rsplit('.', 1)[1].lower()
         if purpose == 'quiz' and extension not in {'png', 'jpg', 'jpeg', 'gif'}:
             return jsonify({'error': 'Quiz uploads must be images'}), 400

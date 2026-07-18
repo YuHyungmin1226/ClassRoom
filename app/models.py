@@ -8,7 +8,9 @@ class Admin(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
 
     def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
+        # pbkdf2:sha256으로 고정 — werkzeug 기본값(scrypt)은 LibreSSL 기반 Python
+        # (예: macOS 시스템 python3)에서 hashlib.scrypt 미지원으로 크래시함.
+        self.password_hash = generate_password_hash(password, method='pbkdf2:sha256')
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)

@@ -13,6 +13,7 @@ from app.models import (
     ClassGroup,
     Flag,
     QuizQuestion,
+    QuizResponse,
     Session,
     Upload,
 )
@@ -244,6 +245,64 @@ class ClassroomAppTests(unittest.TestCase):
             self.assertEqual(Flag.query.count(), 0)
             self.assertEqual(Upload.query.count(), 0)
         self.assertFalse(os.path.exists(absolute_path))
+
+    def test_upload_rejects_filename_that_sanitizes_to_no_extension(self):
+        _class_id, session_id = self.make_session()
+        self.set_participant(self.client, 'owner')
+        response = self.client.post(
+            '/upload',
+            data={
+                'session_id': session_id,
+                'purpose': 'flag',
+                # secure_filename('.png') == 'png' (dot stripped) — must not crash.
+                'file': (io.BytesIO(b'data'), '.png'),
+            },
+            content_type='multipart/form-data',
+        )
+        self.assertEqual(response.status_code, 400)
+        with self.app.app_context():
+            self.assertEqual(Upload.query.count(), 0)
+
+    def test_editing_quiz_question_regrades_existing_responses(self):
+        _class_id, session_id = self.make_session(class_type='classquiz')
+        with self.app.app_context():
+            question = QuizQuestion(
+                session_id=session_id,
+                index=1,
+                q_type='short',
+                question='2+2?',
+                correct_answer='4',
+            )
+            db.session.add(question)
+            db.session.commit()
+            question_id = question.id
+
+        self.set_participant(self.client, 'student-1')
+        student_socket = socketio.test_client(self.app, flask_test_client=self.client)
+        student_socket.emit('join', {'session_id': session_id})
+        student_socket.emit('submit_quiz_response', {
+            'session_id': session_id,
+            'question_id': question_id,
+            'response': '4',
+            'author_name': 'Student',
+        })
+        with self.app.app_context():
+            self.assertTrue(QuizResponse.query.filter_by(question_id=question_id).one().is_correct)
+
+        admin_client = self.app.test_client()
+        self.set_admin(admin_client)
+        admin_socket = socketio.test_client(self.app, flask_test_client=admin_client)
+        admin_socket.emit('join', {'session_id': session_id})
+        admin_socket.emit('edit_quiz_question', {
+            'session_id': session_id,
+            'question_id': question_id,
+            'correct_answer': '5',
+        })
+        admin_socket.disconnect()
+        student_socket.disconnect()
+
+        with self.app.app_context():
+            self.assertFalse(QuizResponse.query.filter_by(question_id=question_id).one().is_correct)
 
     def test_quiz_events_reject_invalid_and_cross_session_questions(self):
         _class_id, first_session_id = self.make_session(class_type='classquiz')
